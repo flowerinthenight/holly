@@ -63,6 +63,89 @@ func getModuleFileName() (string, error) {
 	return string(utf16.Decode(b[0:n])), nil
 }
 
+func localExec(args []string) error {
+	var err error
+	switch len(args) {
+	case 1:
+		c := exec.Command(args[0])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 2:
+		c := exec.Command(args[0], args[1])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 3:
+		c := exec.Command(args[0], args[1], args[2])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 4:
+		c := exec.Command(args[0], args[1], args[2], args[3])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 5:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 6:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 7:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 8:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 9:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 10:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 11:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 12:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 13:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 14:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	case 15:
+		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14])
+		if err = c.Run(); err != nil {
+			trace(err.Error())
+		}
+	}
+
+	return err
+}
+
 func setUpdateSelfAfterReboot(old string, new string) error {
 	var MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
 	var sysproc = syscall.MustLoadDLL("kernel32.dll").MustFindProc("MoveFileExW")
@@ -243,83 +326,7 @@ func handleMainExecute(m *svccontext) error {
 						trace("  " + e)
 					}
 
-					switch len(items2) {
-					case 1:
-						c := exec.Command(items2[0])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 2:
-						c := exec.Command(items2[0], items2[1])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 3:
-						c := exec.Command(items2[0], items2[1], items2[2])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 4:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 5:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 6:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 7:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 8:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 9:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 10:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8], items2[9])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 11:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8], items2[9], items2[10])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 12:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8], items2[9], items2[10], items2[11])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 13:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8], items2[9], items2[10], items2[11], items2[12])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 14:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8], items2[9], items2[10], items2[11], items2[12], items2[13])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					case 15:
-						c := exec.Command(items2[0], items2[1], items2[2], items2[3], items2[4], items2[5], items2[6], items2[7], items2[8], items2[9], items2[10], items2[11], items2[12], items2[13], items2[14])
-						if err := c.Run(); err != nil {
-							trace(err.Error())
-						}
-					}
+					localExec(items2)
 
 					// Clear up for reuse
 					s2 = nil
