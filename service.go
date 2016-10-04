@@ -176,7 +176,7 @@ func rebootSystem() error {
 	return nil
 }
 
-func updateGitLabRunner(m *svccontext) http.HandlerFunc {
+func handlePostUpdateGitlabRunner(m *svccontext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
@@ -341,7 +341,7 @@ func handleMainExecute(m *svccontext) error {
 	return nil
 }
 
-func updateSelf(m *svccontext) http.HandlerFunc {
+func handlePostUpdateSelf(m *svccontext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		// By default, we reboot after setup update. To cancel, we need reboot=false param.
@@ -384,13 +384,13 @@ func updateSelf(m *svccontext) http.HandlerFunc {
 	})
 }
 
-func getInternalVersion(m *svccontext) http.HandlerFunc {
+func handleGetInternalVersion(m *svccontext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, internalVersion)
 	})
 }
 
-func aqnvBuildExistGet(m *svccontext) http.HandlerFunc {
+func handleGetBuildExists(m *svccontext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// variables
 		vars := mux.Vars(r)
@@ -431,6 +431,32 @@ func aqnvBuildExistGet(m *svccontext) http.HandlerFunc {
 	})
 }
 
+func handlePostExec(m *svccontext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Cannot read body.", 500)
+			return
+		}
+
+		str := fmt.Sprintf("%s", body)
+		trace(str)
+		fmt.Fprintf(w, "hello")
+
+		/*
+			q := r.URL.Query()
+			cmd, ok := q["cmd"]
+			if ok {
+				trace("cmd: " + cmd[0])
+				fmt.Fprintf(w, "cmd: "+cmd[0])
+			} else {
+				http.Error(w, "Query parameter 'cmd' required.", 500)
+				return
+			}
+		*/
+	})
+}
+
 func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
@@ -443,10 +469,11 @@ func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		mux := mux.NewRouter()
 		// API version 1
 		v1 := mux.PathPrefix("/api/v1").Subrouter()
-		v1.Methods("GET").Path("/version").Handler(getInternalVersion(m))
-		v1.Methods("GET").Path("/{name}/builds/exists").Handler(aqnvBuildExistGet(m))
-		v1.Methods("POST").Path("/update/self").Handler(updateSelf(m))
-		v1.Methods("POST").Path("/update/runner").Handler(updateGitLabRunner(m))
+		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(m))
+		v1.Methods("GET").Path("/{name}/builds/exists").Handler(handleGetBuildExists(m))
+		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
+		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
+		v1.Methods("POST").Path("/exec").Handler(handlePostExec(m))
 		n := negroni.Classic()
 		n.UseHandler(mux)
 		trace("Launching http interface...")
