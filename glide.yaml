@@ -1,0 +1,16 @@
+package: flowerinthenight/holly
+import:
+- package: github.com/gorilla/mux
+  version: ^1.1.0
+- package: github.com/tylerb/graceful
+  version: ^1.2.13
+- package: github.com/urfave/cli
+  version: ^1.18.1
+- package: github.com/urfave/negroni
+  version: ^0.2.0
+- package: golang.org/x/sys
+  subpackages:
+  - windows/svc
+  - windows/svc/debug
+  - windows/svc/eventlog
+  - windows/svc/mgr

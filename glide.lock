@@ -1,0 +1,23 @@
+hash: 18cf80fa89650f120214436fb505a3f911883f8f94b8973ac2cfaa94c45b442b
+updated: 2016-10-04T14:18:16.5325517+09:00
+imports:
+- name: github.com/gorilla/context
+  version: 08b5f424b9271eedf6f9f0ce86cb9396ed337a42
+- name: github.com/gorilla/mux
+  version: 0eeaf8392f5b04950925b8a69fe70f110fa7cbfc
+- name: github.com/tylerb/graceful
+  version: 50a48b6e73fcc75b45e22c05b79629a67c79e938
+- name: github.com/urfave/cli
+  version: a14d7d367bc02b1f57d88de97926727f2d936387
+- name: github.com/urfave/negroni
+  version: fde5e16d32adc7ad637e9cd9ad21d4ebc6192535
+- name: golang.org/x/sys
+  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
+  subpackages:
+  - windows
+  - windows/registry
+  - windows/svc
+  - windows/svc/debug
+  - windows/svc/eventlog
+  - windows/svc/mgr
+testImports: []
