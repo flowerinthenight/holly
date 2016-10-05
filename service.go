@@ -3,10 +3,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
+	// "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,87 +66,134 @@ func getModuleFileName() (string, error) {
 	return string(utf16.Decode(b[0:n])), nil
 }
 
-func localExec(args []string) error {
+func localExec(args []string) (string, error) {
+	var outStr string
+	var out bytes.Buffer
 	var err error
 	switch len(args) {
 	case 1:
 		c := exec.Command(args[0])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 2:
 		c := exec.Command(args[0], args[1])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 3:
 		c := exec.Command(args[0], args[1], args[2])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 4:
 		c := exec.Command(args[0], args[1], args[2], args[3])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 5:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 6:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 7:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 8:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 9:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 10:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 11:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 12:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 13:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 14:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	case 15:
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14])
+		c.Stdout = &out
 		if err = c.Run(); err != nil {
 			trace(err.Error())
+		} else {
+			outStr = out.String()
 		}
 	}
 
-	return err
+	return outStr, err
 }
 
 func setUpdateSelfAfterReboot(old string, new string) error {
@@ -431,29 +481,40 @@ func handleGetBuildExists(m *svccontext) http.HandlerFunc {
 	})
 }
 
+// This is quite dangerous since we can execute virtually any command, considering that this service
+// is running as SYSTEM account in session 0.
 func handlePostExec(m *svccontext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "Cannot read body.", 500)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 
-		str := fmt.Sprintf("%s", body)
-		trace(str)
-		fmt.Fprintf(w, "hello")
+		defer r.Body.Close()
+		var m map[string]interface{}
+		err = json.Unmarshal(body, &m)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
 
-		/*
-			q := r.URL.Query()
-			cmd, ok := q["cmd"]
-			if ok {
-				trace("cmd: " + cmd[0])
-				fmt.Fprintf(w, "cmd: "+cmd[0])
-			} else {
-				http.Error(w, "Query parameter 'cmd' required.", 500)
-				return
-			}
-		*/
+		cmd, ok := m["cmd"]
+		if !ok {
+			http.Error(w, "No 'cmd' option found.", 500)
+			return
+		}
+
+		cmdStr := fmt.Sprintf("%s", cmd)
+		args := strings.Split(cmdStr, " ")
+		res, err := localExec(args)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		trace(`[` + cmdStr + `]` + "\n" + res)
+		fmt.Fprintf(w, `[`+cmdStr+`]`+"\n"+res)
 	})
 }
 
