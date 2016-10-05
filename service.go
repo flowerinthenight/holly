@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	// "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,13 +42,14 @@ func readLines(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
+	defer file.Close()
 	var lines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
+
 	return lines, scanner.Err()
 }
 
@@ -300,6 +300,167 @@ func handlePostUpdateGitlabRunner(m *svccontext) http.HandlerFunc {
 	})
 }
 
+func handlePostUpdateSelf(m *svccontext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		// By default, we reboot after setup update. To cancel, we need reboot=false param.
+		reboot := true
+		rb, ok := q["reboot"]
+		if ok {
+			if rb[0] == "false" {
+				reboot = false
+			}
+		}
+
+		r.ParseMultipartForm(32 << 20)
+		file, handler, err := r.FormFile("uploadfile")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer file.Close()
+		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
+		trace(str)
+		path, _ := getModuleFileName()
+		_, fstr := filepath.Split(handler.Filename)
+		fstr = filepath.Dir(path) + `\` + fstr + `_new`
+		f, err := os.Create(fstr)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer f.Close()
+		io.Copy(f, file)
+		fmt.Fprintf(w, "Self update applied after reboot.")
+		trace(path + ` --> ` + fstr)
+		err = setUpdateSelfAfterReboot(path, fstr)
+		if reboot {
+			trace("Rebooting system...")
+			rebootSystem()
+		}
+	})
+}
+
+func handleGetInternalVersion(m *svccontext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, internalVersion)
+	})
+}
+
+/*
+func handleGetBuildExists(m *svccontext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// variables
+		vars := mux.Vars(r)
+		name := vars["name"]
+		trace("{name}", name)
+		// query params
+		q := r.URL.Query()
+		bld, ok := q["build"]
+		if ok {
+			trace("Build param: " + bld[0])
+			base := `c:\ftp-deploy\` + name + `\x64\`
+			files, err := ioutil.ReadDir(base + bld[0])
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+
+			ping := false
+			for _, f := range files {
+				p := base + f.Name()
+				trace(p)
+				matched, _ := regexp.MatchString(`(bin|iEMV|iemv)-\[.+\]\.zip$`, p)
+				if matched {
+					ping = true
+					break
+				}
+			}
+
+			if ping {
+				fmt.Fprintf(w, "TRUE")
+			} else {
+				fmt.Fprintf(w, "FALSE")
+			}
+		} else {
+			http.Error(w, "Query parameter 'build' required.", 500)
+			return
+		}
+	})
+}
+*/
+
+// This is quite dangerous since we can execute virtually any command, considering that this service
+// is running as SYSTEM account in session 0.
+func handlePostExec(m *svccontext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer r.Body.Close()
+		var m map[string]interface{}
+		err = json.Unmarshal(body, &m)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		cmd, ok := m["cmd"]
+		if !ok {
+			http.Error(w, "No 'cmd' option found.", 500)
+			return
+		}
+
+		cmdStr := fmt.Sprintf("%s", cmd)
+		args := strings.Split(cmdStr, " ")
+		res, err := localExec(args)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		trace(`[` + cmdStr + `]` + "\n" + res)
+		fmt.Fprintf(w, `[`+cmdStr+`]`+"\n"+res)
+	})
+}
+
+func handleGetFileStat(m *svccontext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var out string
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer r.Body.Close()
+		files := fmt.Sprintf("%s", body)
+		trace(files)
+		fl := strings.Split(files, ",")
+		for _, f := range fl {
+			trace(f)
+			out += `[` + f + `]` + "\n"
+			stats, err := os.Stat(f)
+			if err != nil {
+				out += err.Error()
+			} else {
+				out += "Name: " + stats.Name() + "\n"
+				out += "Size: " + fmt.Sprintf("%v", stats.Size()) + "\n"
+				out += "Mode: " + fmt.Sprintf("%v", stats.Mode()) + "\n"
+				out += "ModTime: " + fmt.Sprintf("%v", stats.ModTime()) + "\n"
+				out += "IsDir: " + fmt.Sprintf("%v", stats.IsDir()) + "\n"
+			}
+
+			fmt.Fprintf(w, out)
+		}
+	})
+}
+
 // Main service function.
 func handleMainExecute(m *svccontext) error {
 	// Set busy/idle state
@@ -391,133 +552,6 @@ func handleMainExecute(m *svccontext) error {
 	return nil
 }
 
-func handlePostUpdateSelf(m *svccontext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		// By default, we reboot after setup update. To cancel, we need reboot=false param.
-		reboot := true
-		rb, ok := q["reboot"]
-		if ok {
-			if rb[0] == "false" {
-				reboot = false
-			}
-		}
-
-		r.ParseMultipartForm(32 << 20)
-		file, handler, err := r.FormFile("uploadfile")
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer file.Close()
-		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		trace(str)
-		path, _ := getModuleFileName()
-		_, fstr := filepath.Split(handler.Filename)
-		fstr = filepath.Dir(path) + `\` + fstr + `_new`
-		f, err := os.Create(fstr)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer f.Close()
-		io.Copy(f, file)
-		fmt.Fprintf(w, "Self update applied after reboot.")
-		trace(path + ` --> ` + fstr)
-		err = setUpdateSelfAfterReboot(path, fstr)
-		if reboot {
-			trace("Rebooting system...")
-			rebootSystem()
-		}
-	})
-}
-
-func handleGetInternalVersion(m *svccontext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, internalVersion)
-	})
-}
-
-func handleGetBuildExists(m *svccontext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// variables
-		vars := mux.Vars(r)
-		name := vars["name"]
-		trace("{name}", name)
-		// query params
-		q := r.URL.Query()
-		bld, ok := q["build"]
-		if ok {
-			trace("Build param: " + bld[0])
-			base := `c:\ftp-deploy\` + name + `\x64\`
-			files, err := ioutil.ReadDir(base + bld[0])
-			if err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-
-			ping := false
-			for _, f := range files {
-				p := base + f.Name()
-				trace(p)
-				matched, _ := regexp.MatchString(`(bin|iEMV|iemv)-\[.+\]\.zip$`, p)
-				if matched {
-					ping = true
-					break
-				}
-			}
-
-			if ping {
-				fmt.Fprintf(w, "TRUE")
-			} else {
-				fmt.Fprintf(w, "FALSE")
-			}
-		} else {
-			http.Error(w, "Query parameter 'build' required.", 500)
-			return
-		}
-	})
-}
-
-// This is quite dangerous since we can execute virtually any command, considering that this service
-// is running as SYSTEM account in session 0.
-func handlePostExec(m *svccontext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer r.Body.Close()
-		var m map[string]interface{}
-		err = json.Unmarshal(body, &m)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		cmd, ok := m["cmd"]
-		if !ok {
-			http.Error(w, "No 'cmd' option found.", 500)
-			return
-		}
-
-		cmdStr := fmt.Sprintf("%s", cmd)
-		args := strings.Split(cmdStr, " ")
-		res, err := localExec(args)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		trace(`[` + cmdStr + `]` + "\n" + res)
-		fmt.Fprintf(w, `[`+cmdStr+`]`+"\n"+res)
-	})
-}
-
 func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
@@ -531,7 +565,7 @@ func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		// API version 1
 		v1 := mux.PathPrefix("/api/v1").Subrouter()
 		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(m))
-		v1.Methods("GET").Path("/{name}/builds/exists").Handler(handleGetBuildExists(m))
+		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(m))
 		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
 		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
 		v1.Methods("POST").Path("/exec").Handler(handlePostExec(m))
@@ -618,17 +652,19 @@ func runService(name string, conf string, isDebug bool) {
 			return
 		}
 	}
-	defer elog.Close()
 
+	defer elog.Close()
 	elog.Info(1, fmt.Sprintf("starting %s service", name))
 	run := svc.Run
 	if isDebug {
 		run = debug.Run
 	}
+
 	err = run(name, &svccontext{conf: conf, busy: 0})
 	if err != nil {
 		elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
 		return
 	}
+
 	elog.Info(1, fmt.Sprintf("%s service stopped", name))
 }
