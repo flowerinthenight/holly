@@ -1,6 +1,6 @@
 # Overview
 
-A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment server, gitlab runners (all VM's are running with Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
+A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running with Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
 
 # Main functions
 
