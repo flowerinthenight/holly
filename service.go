@@ -4,7 +4,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -394,29 +393,16 @@ func handlePostExec(m *svcContext) http.HandlerFunc {
 		}
 
 		defer r.Body.Close()
-		var m map[string]interface{}
-		err = json.Unmarshal(body, &m)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		cmd, ok := m["cmd"]
-		if !ok {
-			http.Error(w, "No 'cmd' option found.", 500)
-			return
-		}
-
-		cmdStr := fmt.Sprintf("%s", cmd)
-		args := strings.Split(cmdStr, " ")
+		cmd := fmt.Sprintf("%s", body)
+		trace(cmd)
+		args := strings.Split(cmd, " ")
 		res, err := localExec(args)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 
-		trace(`[` + cmdStr + `]` + "\n" + res)
-		fmt.Fprintf(w, `[`+cmdStr+`]`+"\n"+res)
+		fmt.Fprintf(w, `[`+cmd+`]`+"\n"+res)
 	})
 }
 
@@ -601,10 +587,10 @@ func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(m))
 		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(m))
 		v1.Methods("GET").Path("/readfile").Handler(handleGetReadFile(m))
+		v1.Methods("GET").Path("/exec").Handler(handlePostExec(m))
 		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
 		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
 		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(m))
-		v1.Methods("POST").Path("/exec").Handler(handlePostExec(m))
 		n := negroni.Classic()
 		n.UseHandler(mux)
 		trace("Launching http interface...")
