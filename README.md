@@ -12,7 +12,7 @@ This service runs command lines periodically as its main function. A `run.conf` 
 
 ## Update self
 
-This is the main reason why I wrote this service; to rid of logging to every VM and do stuff.
+This is the main reason why I wrote this service; to rid of logging in to every VM and do stuff.
 
 You can use `n1` to upload a new version of this service to itself.
 
