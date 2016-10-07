@@ -2,7 +2,7 @@
 
 A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment server, gitlab runners (all VM's are running with Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
 
-# Functions
+# Main functions
 
 ## Schedule commands to run periodically
 
@@ -38,38 +38,44 @@ Same with updating the service itself, without the reboot.
 n1.exe update --file [new-gitlab-runner-exe] --hosts [ip1, ip2, ip3, ...] conf
 ```
 
-#### Build and install the service
+## File stats
 
 ```
-cd service
-go build
-service.exe install
-service.exe start
+n1.exe stat --files [comma-separated files/dirs] --host [ip]
 ```
 
-#### Query the running service's version
+## Read file
 
-You can do this using a browser. Navigate to `http://ip-address:8080/api/v1/version`. It should print the current version.
-
-#### Create a new build of the service
-
-Update the internal version string in `sevice\main.go`. Then build it.
-
-#### Use the client to upload the new service build
+I use this mainly to confirm whether the `run.conf` update process is successful or not.
 
 ```
-cd client
-go build
-client.exe --file "path-of-the-new-service-build" --url http://ip-address:8080/api/v1/update/self self
+n1.exe read --file [file-to-read] --host [ip]
 ```
 
-This should upload the new file, then the target system will reboot after upload.
+## Execute commands remotely
 
-#### Confirm updated service binary after reboot
+Quite a dangerous feature, though. Remember that this service runs under SYSTEM account in session 0.
 
-You can do this using a browser. Navigate to `http://ip-address:8080/api/v1/version`. It should print the updated version.
+```
+n1.exe exec --cmd [cmd-to-execute] --host [ip]
+```
 
-# ETW Logging
+## Query service version
+
+I use this mainly to confirm whether the service update process is successful or not.
+
+```
+n1.exe version --host [ip]
+```
+
+# Installation
+
+```
+holly.exe install
+holly.exe start
+```
+
+# ETW logging
 
 Logging uses ETW. For more information, check out this [project](https://github.com/flowerinthenight/go-windows-service-etw).
 
