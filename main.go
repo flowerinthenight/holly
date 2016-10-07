@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 )
 
-const internalVersion = "1.7"
+const internalVersion = "1.8"
 const svcName = "holly"
 
 var (

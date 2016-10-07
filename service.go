@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -31,7 +31,7 @@ import (
 
 var elog debug.Log
 
-type svccontext struct {
+type svcContext struct {
 	conf string
 	busy int32 // 0 = idle; 1 = busy
 }
@@ -226,7 +226,12 @@ func rebootSystem() error {
 	return nil
 }
 
-func handlePostUpdateGitlabRunner(m *svccontext) http.HandlerFunc {
+func restartSelf() error {
+	// Todo
+	return nil
+}
+
+func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
@@ -300,7 +305,36 @@ func handlePostUpdateGitlabRunner(m *svccontext) http.HandlerFunc {
 	})
 }
 
-func handlePostUpdateSelf(m *svccontext) http.HandlerFunc {
+func handlePostUpdateConf(m *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseMultipartForm(32 << 20)
+		file, handler, err := r.FormFile("uploadfile")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer file.Close()
+		atomic.StoreInt32(&m.busy, 1)
+		defer atomic.StoreInt32(&m.busy, 0)
+		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
+		trace(str)
+		path, _ := getModuleFileName()
+		_, fstr := filepath.Split(handler.Filename)
+		fstr = filepath.Dir(path) + `\` + fstr
+		f, err := os.Create(fstr)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer f.Close()
+		io.Copy(f, file)
+		fmt.Fprintf(w, "Config file updated.")
+	})
+}
+
+func handlePostUpdateSelf(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		// By default, we reboot after setup update. To cancel, we need reboot=false param.
@@ -343,58 +377,15 @@ func handlePostUpdateSelf(m *svccontext) http.HandlerFunc {
 	})
 }
 
-func handleGetInternalVersion(m *svccontext) http.HandlerFunc {
+func handleGetInternalVersion(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, internalVersion)
 	})
 }
 
-/*
-func handleGetBuildExists(m *svccontext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// variables
-		vars := mux.Vars(r)
-		name := vars["name"]
-		trace("{name}", name)
-		// query params
-		q := r.URL.Query()
-		bld, ok := q["build"]
-		if ok {
-			trace("Build param: " + bld[0])
-			base := `c:\ftp-deploy\` + name + `\x64\`
-			files, err := ioutil.ReadDir(base + bld[0])
-			if err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-
-			ping := false
-			for _, f := range files {
-				p := base + f.Name()
-				trace(p)
-				matched, _ := regexp.MatchString(`(bin|iEMV|iemv)-\[.+\]\.zip$`, p)
-				if matched {
-					ping = true
-					break
-				}
-			}
-
-			if ping {
-				fmt.Fprintf(w, "TRUE")
-			} else {
-				fmt.Fprintf(w, "FALSE")
-			}
-		} else {
-			http.Error(w, "Query parameter 'build' required.", 500)
-			return
-		}
-	})
-}
-*/
-
 // This is quite dangerous since we can execute virtually any command, considering that this service
 // is running as SYSTEM account in session 0.
-func handlePostExec(m *svccontext) http.HandlerFunc {
+func handlePostExec(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -429,7 +420,7 @@ func handlePostExec(m *svccontext) http.HandlerFunc {
 	})
 }
 
-func handleGetFileStat(m *svccontext) http.HandlerFunc {
+func handleGetFileStat(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var out string
 		body, err := ioutil.ReadAll(r.Body)
@@ -461,9 +452,33 @@ func handleGetFileStat(m *svccontext) http.HandlerFunc {
 	})
 }
 
+func handleGetReadFile(m *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var out string
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer r.Body.Close()
+		file := fmt.Sprintf("%s", body)
+		trace(file)
+		trace(file)
+		out += `[` + file + `]` + "\n"
+		data, err := ioutil.ReadFile(file)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		// Write file contents
+		w.Write(data)
+	})
+}
+
 // Main service function.
-func handleMainExecute(m *svccontext) error {
-	// Set busy/idle state
+func handleMainExecute(m *svcContext, count uint64) error {
 	atomic.StoreInt32(&m.busy, 1)
 	defer atomic.StoreInt32(&m.busy, 0)
 
@@ -484,79 +499,98 @@ func handleMainExecute(m *svccontext) error {
 	for _, str := range lines {
 		s := strings.TrimSpace(str)
 		var s2 []string
-		if len(str) > 0 {
-			if s[0] != '#' {
-				trace(s)
-				items := strings.Split(s, " ")
-				if strings.TrimSpace(items[0]) == "sync" && strings.TrimSpace(items[1]) == "=" {
-					for i, e := range items {
-						if len(e) > 0 {
-							if e[0] == '"' {
-								start = append(start, i)
-							}
+		// Skip blank lines
+		if len(str) == 0 {
+			continue
+		}
 
-							if e[len(e)-1] == '"' {
-								end = append(end, i)
-							}
-						}
+		// and comments
+		if s[0] == '#' {
+			continue
+		}
+
+		trace(s)
+		items := strings.Split(s, " ")
+		val, err := strconv.ParseUint(items[0], 10, 64)
+		if err != nil {
+			trace("Invalid minute value: ", items[0])
+			continue
+		}
+
+		for i, e := range items {
+			if len(e) == 0 {
+				continue
+			}
+
+			if e[0] == '"' {
+				start = append(start, i)
+			}
+
+			if e[len(e)-1] == '"' {
+				end = append(end, i)
+			}
+		}
+
+		// Extract double-quoted arguments
+		trace("Double-quoted arguments indeces:")
+		tr := fmt.Sprintf("  start:%v, end:%v", start, end)
+		trace(tr)
+		for i, e := range start {
+			s2 = append(s2, strings.Join(items[e:end[i]+1], " "))
+		}
+
+		// Reconstruct arguments list
+		var items2 []string
+		skip := false
+		j := 0
+		for _, e := range items {
+			if len(e) == 0 {
+				continue
+			}
+
+			if e[0] == '"' {
+				items2 = append(items2, s2[j])
+				j += 1
+				skip = true
+			} else {
+				if e[len(e)-1] == '"' {
+					skip = false
+				} else {
+					if !skip {
+						items2 = append(items2, e)
 					}
-
-					// Extract double-quoted arguments
-					trace("Double-quoted arguments indeces:")
-					tr := fmt.Sprintf("  start:%v, end:%v", start, end)
-					trace(tr)
-					for i, e := range start {
-						s2 = append(s2, strings.Join(items[e:end[i]+1], " "))
-					}
-
-					// Reconstruct arguments list
-					var items2 []string
-					skip := false
-					j := 0
-					for _, e := range items {
-						if len(e) > 0 {
-							if e[0] == '"' {
-								items2 = append(items2, s2[j])
-								j += 1
-								skip = true
-							} else {
-								if e[len(e)-1] == '"' {
-									skip = false
-								} else {
-									if !skip {
-										items2 = append(items2, e)
-									}
-								}
-							}
-						}
-					}
-
-					trace("Arguments list:")
-					items2 = append(items2[:0], items2[2:]...)
-					for _, e := range items2 {
-						trace("  " + e)
-					}
-
-					localExec(items2)
-
-					// Clear up for reuse
-					s2 = nil
-					start = nil
-					end = nil
-					trace("\n")
 				}
 			}
 		}
+
+		trace("Arguments list:")
+		items2 = append(items2[:0], items2[1:]...)
+		for _, e := range items2 {
+			trace("  " + e)
+		}
+
+		// Run the command line
+		if math.Mod(float64(count), float64(val)) == 0 {
+			_, err := localExec(items2)
+			if err != nil {
+				trace(err)
+			}
+		}
+
+		s2 = nil
+		start = nil
+		end = nil
+		trace("\n")
 	}
 
 	return nil
 }
 
-func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
-	tickdef := 5 * time.Second // we default to 5 seconds for main timer
-	proceed := false
+	tickdef := 1 * time.Minute
+	var cntr uint64
 	var busy int32
 
 	// Start our main http interface
@@ -566,8 +600,10 @@ func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		v1 := mux.PathPrefix("/api/v1").Subrouter()
 		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(m))
 		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(m))
+		v1.Methods("GET").Path("/readfile").Handler(handleGetReadFile(m))
 		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
 		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
+		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(m))
 		v1.Methods("POST").Path("/exec").Handler(handlePostExec(m))
 		n := negroni.Classic()
 		n.UseHandler(mux)
@@ -575,33 +611,7 @@ func (m *svccontext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		graceful.Run(":8080", 5*time.Second, n)
 	}()
 
-	// Get the timer delay from config file
-	path, err := getModuleFileName()
-	if err != nil {
-		trace(err.Error())
-	} else {
-		dir, _ := filepath.Abs(filepath.Dir(path))
-		conf, err := ioutil.ReadFile(dir + "\\run.conf")
-		if err != nil {
-			trace(err.Error())
-		} else {
-			re := regexp.MustCompile(`timer\s?=\s?\d+`)
-			tmr := re.Find(conf)
-			if tmr != nil {
-				kvtmr := strings.Split(string(tmr), "=")
-				val, err := strconv.Atoi(strings.TrimSpace(kvtmr[1]))
-				if err != nil {
-					trace(err.Error())
-				} else {
-					str := fmt.Sprintf("New timer tick: %d (seconds)", val)
-					trace(str)
-					tickdef = time.Duration(val) * time.Second
-					proceed = true
-				}
-			}
-		}
-	}
-
+	cntr = 0
 	maintick := time.Tick(tickdef)
 	slowtick := time.Tick(2 * time.Second)
 	tick := maintick
@@ -610,13 +620,16 @@ loop:
 	for {
 		select {
 		case <-tick:
+			cntr = cntr + 1
+			if cntr == math.MaxUint64 {
+				cntr = 1
+			}
+
 			busy = atomic.LoadInt32(&m.busy)
 			if busy == 0 {
-				if proceed {
-					go func(m *svccontext) {
-						handleMainExecute(m)
-					}(m)
-				}
+				go func(m *svcContext, count uint64) {
+					handleMainExecute(m, count)
+				}(m, cntr)
 			}
 		case c := <-r:
 			switch c.Cmd {
@@ -638,6 +651,7 @@ loop:
 			}
 		}
 	}
+
 	changes <- svc.Status{State: svc.StopPending}
 	return
 }
@@ -660,7 +674,7 @@ func runService(name string, conf string, isDebug bool) {
 		run = debug.Run
 	}
 
-	err = run(name, &svccontext{conf: conf, busy: 0})
+	err = run(name, &svcContext{conf: conf, busy: 0})
 	if err != nil {
 		elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
 		return
