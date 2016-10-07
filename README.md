@@ -1,6 +1,6 @@
 # Overview
 
-A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running with Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
+A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
 
 # Main functions
 
@@ -74,6 +74,12 @@ n1.exe version --host [ip]
 holly.exe install
 holly.exe start
 ```
+
+# Troubleshooting
+
+## Service cannot start
+
+* `disptrace.dll` is built using VS2015 so you need to install VC++ 2015 redistributable.
 
 # ETW logging
 
