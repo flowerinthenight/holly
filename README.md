@@ -20,7 +20,7 @@ You can use `n1` to upload a new version of this service to itself.
 n1.exe update --file [new-service-exe] --hosts [ip1, ip2, ip3, ...] self
 ```
 
-With this command, `n1` will upload the file, service saves it, then call `MoveFileEx` API to ask Windows to overwrite the running binary with the newly uploaded one after system reboot. By default, the service will reboot the system after calling `MoveFileEx`.
+With this command, `n1` will upload the file, service saves it, then call `MoveFileEx` API with the `MOVEFILE_DELAY_UNTIL_REBOOT` flag to ask Windows to overwrite the running binary with the newly uploaded one after system reboot. By default, the service will reboot the system after calling `MoveFileEx`.
 
 ## Update all gitlab runners
 
