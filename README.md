@@ -94,7 +94,7 @@ holly.exe remove
 
 # ETW logging
 
-Logging uses ETW. For more information, check out this [project](https://github.com/flowerinthenight/go-windows-service-etw).
+Logging uses ETW. For more information, check out this [project](https://github.com/flowerinthenight/go-windows-service-etw) or this [blog post](http://flowerinthenight.com/blog/2016/03/01/etw-part1).
 
 ## Quickstart guide to view ETW logs (to aid in service debugging)
 
