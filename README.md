@@ -96,6 +96,28 @@ holly.exe remove
 
 Logging uses ETW. For more information, check out this [project](https://github.com/flowerinthenight/go-windows-service-etw).
 
+## Quickstart guide to view ETW logs (to aid in service debugging)
+
+* Install manifest file
+
+```
+admin_prompt> wevtutil.exe im jytrace.man /mf:"full_path_to_disptrace.dll" /rf:"full_path_to_disptrace.dll"
+```
+
+* Use `mftrace.exe` to view real-time logs from service from command line/Powershell. You can find `mftrace.exe` from the Windows SDK/WDK installation folder (i.e. `C:\Program Files (x86)\Windows Kits\10\bin\x86\`). Note that `mftrace.exe` needs `mfdetours.dll` (from the same location) to run, in case you want to copy the two files to a separate location. For more information about `mftrace.exe`, check out this [link](https://msdn.microsoft.com/en-us/library/windows/desktop/ff685116(v=vs.85).aspx).
+
+```
+admin_prompt> mftrace.exe -c config.xml
+```
+
+If you're forking/contributing/modifying the service and you want more logs from the service, use the provided `trace()` wrapper function.
+
+## Uninstall the manifest file
+
+```
+admin_prompt> wevtutil.exe um jytrace.man
+```
+
 # License
 
 [The MIT License](./LICENSE.md)
