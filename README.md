@@ -38,6 +38,14 @@ Same with updating the service itself, without the reboot.
 n1.exe update --file [new-gitlab-runner-exe] --hosts [ip1, ip2, ip3, ...] conf
 ```
 
+## Upload file
+
+I use this to upload executable(s) to add to `run.conf` but you can upload any file to any location.
+
+```
+n1.exe upload --file [any-file] --path [location/path-to-copy-the-file] --host [ip]
+```
+
 ## File stats
 
 ```
