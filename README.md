@@ -92,6 +92,10 @@ holly.exe remove
 
 * `disptrace.dll` is built using VS2015 so you need to install VC++ 2015 redistributable.
 
+## Cannot access http interface
+
+* Add `holly.exe` file to 'Allowed apps' in your Windows Firewall. You can also enable port 8080 as well.
+
 # ETW logging
 
 Logging uses ETW. For more information, check out this [project](https://github.com/flowerinthenight/go-windows-service-etw) or this [blog series](http://flowerinthenight.com/blog/2016/03/01/etw-part1).
