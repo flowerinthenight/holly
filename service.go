@@ -406,6 +406,52 @@ func handlePostExec(m *svcContext) http.HandlerFunc {
 	})
 }
 
+func handlePostUpload(m *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reply string
+		r.ParseMultipartForm(32 << 20)
+		file, handler, err := r.FormFile("uploadfile")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer file.Close()
+		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
+		trace(str)
+		path := r.FormValue("path")
+		trace("path: " + path)
+		if path == "root" {
+			fp, _ := getModuleFileName()
+			_, fstr := filepath.Split(handler.Filename)
+			fstr = filepath.Dir(fp) + `\` + fstr
+			f, err := os.Create(fstr)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+
+			defer f.Close()
+			io.Copy(f, file)
+			reply = "File copied: " + fstr
+		} else {
+			_, fstr := filepath.Split(handler.Filename)
+			fstr = path + `\` + fstr
+			f, err := os.Create(fstr)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+
+			defer f.Close()
+			io.Copy(f, file)
+			reply = "File copied: " + fstr
+		}
+
+		fmt.Fprintf(w, reply)
+	})
+}
+
 func handleGetFileStat(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var out string
@@ -591,6 +637,7 @@ func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
 		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
 		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(m))
+		v1.Methods("POST").Path("/upload").Handler(handlePostUpload(m))
 		n := negroni.Classic()
 		n.UseHandler(mux)
 		trace("Launching http interface...")
