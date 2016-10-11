@@ -70,9 +70,20 @@ n1.exe version --host [ip]
 
 # Installation
 
+Run the following commands as administrator:
+
 ```
 holly.exe install
 holly.exe start
+```
+
+# Uninstall
+
+Run the following commands as administrator:
+
+```
+holly.exe stop
+holly.exe remove
 ```
 
 # Troubleshooting
