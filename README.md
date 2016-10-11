@@ -112,12 +112,6 @@ admin_prompt> mftrace.exe -c config.xml
 
 If you're forking/contributing/modifying the service and you want more logs from the service, use the provided `trace()` wrapper function.
 
-## Uninstall the manifest file
-
-```
-admin_prompt> wevtutil.exe um jytrace.man
-```
-
 # License
 
 [The MIT License](./LICENSE.md)
