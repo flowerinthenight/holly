@@ -74,7 +74,7 @@ Since `cmd` will be executed from service session, it is not interactive by defa
 n1.exe exec --cmd [cmd-to-execute] --host [ip] --interactive=true --wait=true --waitms=5000
 ```
 
-The service will run `cmd` within the same session as `winlogon.exe` (not session 0) via the [`CreateProcessAsUser`](https://msdn.microsoft.com/en-us/library/windows/desktop/ms682429%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396) API. This is done through an external function `StartSystemUserProcess` hosted in [`libcore.dll`](https://github.com/flowerinthenight/win-cpplib).
+The service will run `cmd` within the same session as `winlogon.exe` (not session 0) via the [`CreateProcessAsUser`](https://msdn.microsoft.com/en-us/library/windows/desktop/ms682429%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396) API. This is done through an external function [`StartSystemUserProcess`](https://github.com/flowerinthenight/win-cpplib/blob/master/libcore/libcore.cpp) hosted in [`libcore.dll`](https://github.com/flowerinthenight/win-cpplib).
 
 ## Query service version
 
