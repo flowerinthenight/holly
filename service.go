@@ -35,6 +35,27 @@ type svcContext struct {
 	busy int32 // 0 = idle; 1 = busy
 }
 
+// Run process as SYSTEM in the same session as winlogon.exe, not session 0.
+func runInteractive(cmd string, args string, wait bool, waitms int) (uint32, error) {
+	var exitCode uint32
+	path, _ := getModuleFileName()
+	lib := filepath.Dir(path) + `\libcore.dll`
+	if _, err := os.Stat(lib); os.IsNotExist(err) {
+		trace(err)
+		return uint32(syscall.ENOENT), fmt.Errorf("Cannot find libcore.dll.")
+	}
+
+	shouldWait := 1
+	if !wait {
+		shouldWait = 0
+	}
+
+	trace("run: ", cmd, " ", args)
+	var runUser = syscall.MustLoadDLL(lib).MustFindProc("StartSystemUserProcess")
+	_, _, err := runUser.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(cmd))), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(args))), 0, uintptr(unsafe.Pointer(&exitCode)), uintptr(shouldWait), uintptr(waitms))
+	return exitCode, err
+}
+
 // readLines reads a whole file into memory and returns a slice of its lines.
 func readLines(path string) ([]string, error) {
 	file, err := os.Open(path)
@@ -384,8 +405,9 @@ func handleGetInternalVersion(m *svcContext) http.HandlerFunc {
 
 // This is quite dangerous since we can execute virtually any command, considering that this service
 // is running as SYSTEM account in session 0.
-func handlePostExec(m *svcContext) http.HandlerFunc {
+func handleGetExec(m *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -396,6 +418,34 @@ func handlePostExec(m *svcContext) http.HandlerFunc {
 		cmd := fmt.Sprintf("%s", body)
 		trace(cmd)
 		args := strings.Split(cmd, " ")
+
+		interactive, ok := q["interactive"]
+		if ok {
+			if interactive[0] == "true" {
+				wait := true
+				waitms := 5000
+				if val, ok := q["wait"]; ok {
+					if val[0] == "false" {
+						wait = false
+					}
+				}
+
+				if val, ok := q["waitms"]; ok {
+					ms, err := strconv.Atoi(val[0])
+					if err == nil {
+						waitms = ms
+					}
+				}
+
+				trace("cmd: ", args[0])
+				trace("args (joined): ", strings.Join(args[1:], " "))
+				r, err := runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
+				trace("return: ", r, ", err: ", err)
+				fmt.Fprintf(w, `[`+cmd+`]`+"\n"+" return: %d, err: "+err.Error(), r)
+				return
+			}
+		}
+
 		res, err := localExec(args)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -633,7 +683,7 @@ func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(m))
 		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(m))
 		v1.Methods("GET").Path("/readfile").Handler(handleGetReadFile(m))
-		v1.Methods("GET").Path("/exec").Handler(handlePostExec(m))
+		v1.Methods("GET").Path("/exec").Handler(handleGetExec(m))
 		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
 		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
 		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(m))
