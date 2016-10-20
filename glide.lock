@@ -1,5 +1,5 @@
 hash: 18cf80fa89650f120214436fb505a3f911883f8f94b8973ac2cfaa94c45b442b
-updated: 2016-10-04T14:18:16.5325517+09:00
+updated: 2016-10-20T18:33:14.2681839+09:00
 imports:
 - name: github.com/gorilla/context
   version: 08b5f424b9271eedf6f9f0ce86cb9396ed337a42
@@ -20,4 +20,6 @@ imports:
   - windows/svc/debug
   - windows/svc/eventlog
   - windows/svc/mgr
+- name: gopkg.in/natefinch/lumberjack.v2
+  version: e21e5cbec0cd0861b9dc302736ad5666c529d93f
 testImports: []

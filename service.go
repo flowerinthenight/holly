@@ -653,6 +653,7 @@ func handleMainExecute(m *svcContext, count uint64) error {
 
 		// Run the command line
 		if math.Mod(float64(count), float64(val)) == 0 {
+			rlf.Println("Execute", items2)
 			_, err := localExec(items2)
 			if err != nil {
 				trace(err)

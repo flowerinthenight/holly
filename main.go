@@ -3,8 +3,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"syscall"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/urfave/cli"
 	"golang.org/x/sys/windows/svc"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const internalVersion = "1.8"
@@ -20,6 +23,7 @@ const svcName = "holly"
 var (
 	mod  *syscall.LazyDLL
 	proc *syscall.LazyProc
+	rlf  *log.Logger
 )
 
 func trace(v ...interface{}) {
@@ -31,7 +35,21 @@ func trace(v ...interface{}) {
 	_, _, _ = proc.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("[" + fnName + "] " + m))))
 }
 
+func initRotatingLog(out io.Writer) {
+	rlf = log.New(out, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile)
+}
+
 func main() {
+	// Initialize rotating logs
+	path, _ := getModuleFileName()
+	logpath := filepath.Dir(path) + `\trace.log`
+	initRotatingLog(&lumberjack.Logger{
+		Filename:   logpath,
+		MaxSize:    500,
+		MaxBackups: 3,
+		MaxAge:     30,
+	})
+
 	mod = syscall.NewLazyDLL("disptrace.dll")
 	proc = mod.NewProc("ETWTrace")
 	isIntSess, err := svc.IsAnInteractiveSession()
