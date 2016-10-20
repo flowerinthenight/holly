@@ -8,7 +8,7 @@ A simple, cron-like Windows service with an http interface. I use this tool to m
 
 Prior to this service, I have been using the task scheduler for running periodic tasks. Over time, it proved to be cumbersome to manage especially with lots of VM's involved.
 
-This service runs command lines periodically as its main function. A `run.conf` configuration file is provided. The lowest timer tick value support is 1 minute. Read the `run.conf` comments for more information.
+This service runs command lines periodically as its main function. A [`run.conf`](./run.conf) configuration file is provided. The lowest timer tick value support is 1 minute. Read the `run.conf` comments for more information.
 
 ## Update self
 
