@@ -68,6 +68,14 @@ Quite a dangerous feature, though. Remember that this service runs under SYSTEM 
 n1.exe exec --cmd [cmd-to-execute] --host [ip]
 ```
 
+Since `cmd` will be executed from service session, it is not interactive by default. To run an interactive command, use the `--interactive=true` option.
+
+```
+n1.exe exec --cmd [cmd-to-execute] --host [ip] --interactive=true --wait=true --waitms=5000
+```
+
+The service will run `cmd` within the same session as `winlogon.exe` (not session 0) via the [`CreateProcessAsUser`](https://msdn.microsoft.com/en-us/library/windows/desktop/ms682429%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396) API.
+
 ## Query service version
 
 I use this mainly to confirm whether the service update process is successful or not.
