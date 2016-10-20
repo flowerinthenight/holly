@@ -1,6 +1,6 @@
 # Overview
 
-A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
+A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running Windows), test automation VM's, etc. A client tool [`n1.exe`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
 
 # Main functions
 
@@ -8,19 +8,19 @@ A simple, cron-like Windows service with an http interface. I use this tool to m
 
 Prior to this service, I have been using the task scheduler for running periodic tasks. Over time, it proved to be cumbersome to manage especially with lots of VM's involved.
 
-This service runs command lines periodically as its main function. A `run.conf` configuration file is provided. The lowest timer tick value support is 1 minute. Read the `run.conf` comments for more information.
+This service runs command lines periodically as its main function. A [`run.conf`](./run.conf) configuration file is provided. The lowest timer tick value support is 1 minute. Read the `run.conf` comments for more information.
 
 ## Update self
 
 This is the main reason why I wrote this service; to rid of logging in to every VM and do stuff.
 
-You can use `n1` to upload a new version of this service to itself.
+You can use [`n1.exe`](https://github.com/flowerinthenight/n1) to upload a new version of this service to itself.
 
 ```
 n1.exe update --file [new-service-exe] --hosts [ip1, ip2, ip3, ...] self
 ```
 
-With this command, `n1` will upload the file, service saves it, then call `MoveFileEx` API with the `MOVEFILE_DELAY_UNTIL_REBOOT` flag to ask Windows to overwrite the running binary with the newly uploaded one after system reboot. By default, the service will reboot the system after calling `MoveFileEx`.
+With this command, [`n1.exe`](https://github.com/flowerinthenight/n1) will upload the file, service saves it, then call [`MoveFileEx`](https://msdn.microsoft.com/en-us/library/windows/desktop/aa365240%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396) API with the `MOVEFILE_DELAY_UNTIL_REBOOT` flag to ask Windows to overwrite the running binary with the newly uploaded one after system reboot. By default, the service will reboot the system after calling `MoveFileEx`.
 
 ## Update all gitlab runners
 
@@ -67,6 +67,14 @@ Quite a dangerous feature, though. Remember that this service runs under SYSTEM 
 ```
 n1.exe exec --cmd [cmd-to-execute] --host [ip]
 ```
+
+Since `cmd` will be executed from service session, it is not interactive by default. To run an interactive command, use the `--interactive=true` option.
+
+```
+n1.exe exec --cmd [cmd-to-execute] --host [ip] --interactive=true --wait=true --waitms=5000
+```
+
+The service will run `cmd` within the same session as `winlogon.exe` (not session 0) via the [`CreateProcessAsUser`](https://msdn.microsoft.com/en-us/library/windows/desktop/ms682429%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396) API. This is done through an external function [`StartSystemUserProcess`](https://github.com/flowerinthenight/win-cpplib/blob/master/libcore/libcore.cpp) hosted in [`libcore.dll`](https://github.com/flowerinthenight/win-cpplib).
 
 ## Query service version
 
