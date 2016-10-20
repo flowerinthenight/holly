@@ -1,6 +1,6 @@
 # Overview
 
-A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running Windows), test automation VM's, etc. A client tool [`n1`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
+A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running Windows), test automation VM's, etc. A client tool [`n1.exe`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
 
 # Main functions
 
@@ -14,13 +14,13 @@ This service runs command lines periodically as its main function. A `run.conf` 
 
 This is the main reason why I wrote this service; to rid of logging in to every VM and do stuff.
 
-You can use `n1` to upload a new version of this service to itself.
+You can use [`n1.exe`](https://github.com/flowerinthenight/n1) to upload a new version of this service to itself.
 
 ```
 n1.exe update --file [new-service-exe] --hosts [ip1, ip2, ip3, ...] self
 ```
 
-With this command, `n1` will upload the file, service saves it, then call `MoveFileEx` API with the `MOVEFILE_DELAY_UNTIL_REBOOT` flag to ask Windows to overwrite the running binary with the newly uploaded one after system reboot. By default, the service will reboot the system after calling `MoveFileEx`.
+With this command, [`n1.exe`](https://github.com/flowerinthenight/n1) will upload the file, service saves it, then call [`MoveFileEx`](https://msdn.microsoft.com/en-us/library/windows/desktop/aa365240%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396) API with the `MOVEFILE_DELAY_UNTIL_REBOOT` flag to ask Windows to overwrite the running binary with the newly uploaded one after system reboot. By default, the service will reboot the system after calling `MoveFileEx`.
 
 ## Update all gitlab runners
 
