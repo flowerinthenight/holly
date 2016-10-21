@@ -68,7 +68,7 @@ Quite a dangerous feature, though. Remember that this service runs under SYSTEM 
 n1.exe exec --cmd [cmd-to-execute] --host [ip]
 ```
 
-Since `cmd` will be executed from service session, it is not interactive by default. To run an interactive command, use the `--interactive=true` option.
+Since `cmd` will be executed from service session, it is not interactive by default. To run an interactive command, use [`n1.exe`](https://github.com/flowerinthenight/n1)'s `--interactive=true` option.
 
 ```
 n1.exe exec --cmd [cmd-to-execute] --host [ip] --interactive=true --wait=true --waitms=5000
