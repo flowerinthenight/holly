@@ -27,6 +27,11 @@ var (
 )
 
 func trace(v ...interface{}) {
+	if proc == nil {
+		return
+	}
+
+	// Log only when trace library is present.
 	pc, _, _, _ := runtime.Caller(1)
 	fn := runtime.FuncForPC(pc)
 	fno := regexp.MustCompile(`^.*\.(.*)$`)
@@ -50,8 +55,15 @@ func main() {
 		MaxAge:     30,
 	})
 
-	mod = syscall.NewLazyDLL("disptrace.dll")
-	proc = mod.NewProc("ETWTrace")
+	proc = nil
+	lib := filepath.Dir(path) + `\disptrace.dll`
+	if _, err := os.Stat(lib); os.IsNotExist(err) {
+		rlf.Println("Cannot find disptrace.dll.")
+	} else {
+		mod = syscall.NewLazyDLL("disptrace.dll")
+		proc = mod.NewProc("ETWTrace")
+	}
+
 	isIntSess, err := svc.IsAnInteractiveSession()
 	if err != nil {
 		log.Println("Failed to determine if we are running in an interactive session: %v", err)
