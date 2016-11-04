@@ -566,8 +566,15 @@ func handleGetReadFile(m *svcContext) http.HandlerFunc {
 func isCmdLineScheduled(line string) (bool, uint64) {
 	star5 := 0 // special case
 	var target uint64 = 0
-	mults := [5]uint64{1, 60, 1440, 43800, 0}
-	evals := [5]bool{false, false, false, false, false} // all should be true when evaluation is done.
+	mults := [5]uint64{
+		1,     // minutes in a minute
+		60,    // minutes in an hour
+		1440,  // minutes in a day
+		43800, // minutes in a month
+		0,     // skip (always exact weekday)
+	}
+
+	evals := [5]bool{false, false, false, false, false}
 	tms := [5]int{
 		time.Now().Minute(),
 		time.Now().Hour(),
