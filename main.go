@@ -47,9 +47,8 @@ func initRotatingLog(out io.Writer) {
 func main() {
 	// Initialize rotating logs
 	path, _ := getModuleFileName()
-	logpath := filepath.Dir(path) + `\trace.log`
 	initRotatingLog(&lumberjack.Logger{
-		Filename:   logpath,
+		Dir:        path,
 		MaxSize:    500,
 		MaxBackups: 3,
 		MaxAge:     30,
