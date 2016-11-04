@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -31,8 +32,9 @@ import (
 var elog debug.Log
 
 type svcContext struct {
-	conf string
-	busy int32 // 0 = idle; 1 = busy
+	conf  string
+	busy  int32           // 0 = idle; 1 = busy
+	mruns map[string]bool // run state for cmd lines
 }
 
 // Run process as SYSTEM in the same session as winlogon.exe, not session 0.
@@ -559,6 +561,109 @@ func handleGetReadFile(m *svcContext) http.HandlerFunc {
 	})
 }
 
+// Returns true if the command line is scheduled (should run). The second value is the total target minutes when
+// the schedule option takes the '*/frequency' form. If zero, that means, the scheduled time is specific.
+func isCmdLineScheduled(line string) (bool, uint64) {
+	star5 := 0 // special case
+	var target uint64 = 0
+	mults := [5]uint64{1, 60, 1440, 43800, 0}
+	evals := [5]bool{false, false, false, false, false} // all should be true when evaluation is done.
+	tms := [5]int{
+		time.Now().Minute(),
+		time.Now().Hour(),
+		time.Now().Day(),
+		int(time.Now().Month()),
+		int(time.Now().Weekday()),
+	}
+
+	trace("reftime: ", tms)
+	r := fmt.Sprintf("^(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)",
+		tms[0],
+		tms[1],
+		tms[2],
+		tms[3],
+		tms[4])
+
+	trace("regexp: ", r)
+	items := strings.Split(line, " ")
+	match, _ := regexp.MatchString(r, line)
+	if match {
+		for idx, item := range items {
+			// Only the first 5 items are needed.
+			if idx > 4 {
+				break
+			}
+
+			if item == "*" {
+				evals[idx] = true
+				star5 += 1
+				continue
+			}
+
+			day := false
+			if idx == 2 {
+				// Day of month (priority over 'day of week').
+				if v, err := strconv.Atoi(item); err == nil {
+					day = true
+					if v == tms[idx] {
+						evals[idx] = true
+						evals[4] = true
+						continue
+					}
+				}
+			}
+
+			if idx == 4 {
+				if !day {
+					// Day of week.
+					if v, err := strconv.Atoi(item); err == nil {
+						if v == tms[idx] {
+							evals[idx] = true
+							evals[2] = true
+							continue
+						}
+					}
+				}
+			}
+
+			vals := strings.Split(item, "/")
+			if len(vals) == 2 && idx < 4 /* day-of-week not included */ {
+				if val, err := strconv.ParseUint(vals[1], 10, 64); err == nil {
+					target += val * mults[idx]
+					evals[idx] = true
+					continue
+				}
+			}
+
+			if v, err := strconv.Atoi(item); err == nil {
+				if v == tms[idx] {
+					evals[idx] = true
+					continue
+				}
+			}
+		}
+
+		valid := true
+		for _, eval := range evals {
+			if !eval {
+				valid = false
+				break
+			}
+		}
+
+		// When all inputs are '*'s, we set target to '1'.
+		if star5 == 5 && target == 0 {
+			target = 1
+		}
+
+		trace("evals: ", evals)
+		trace("target: ", target)
+		return valid, target
+	}
+
+	return false, 0
+}
+
 // Main service function.
 func handleMainExecute(m *svcContext, count uint64) error {
 	atomic.StoreInt32(&m.busy, 1)
@@ -577,6 +682,7 @@ func handleMainExecute(m *svcContext, count uint64) error {
 		return err
 	}
 
+	activeLinesExact := map[string]bool{}
 	var start, end []int
 	for _, str := range lines {
 		s := strings.TrimSpace(str)
@@ -591,14 +697,8 @@ func handleMainExecute(m *svcContext, count uint64) error {
 			continue
 		}
 
-		trace(s)
 		items := strings.Split(s, " ")
-		val, err := strconv.ParseUint(items[0], 10, 64)
-		if err != nil {
-			trace("Invalid minute value: ", items[0])
-			continue
-		}
-
+		trace(items)
 		for i, e := range items {
 			if len(e) == 0 {
 				continue
@@ -646,17 +746,46 @@ func handleMainExecute(m *svcContext, count uint64) error {
 		}
 
 		trace("Arguments list:")
-		items2 = append(items2[:0], items2[1:]...)
+		items2 = append(items2[:0], items2[5:]...)
 		for _, e := range items2 {
 			trace("  " + e)
 		}
 
 		// Run the command line
-		if math.Mod(float64(count), float64(val)) == 0 {
-			rlf.Println("Execute", items2)
-			_, err := localExec(items2)
-			if err != nil {
-				trace(err)
+		sched, target := isCmdLineScheduled(s)
+		if target > 0 {
+			trace("count: ", count)
+			if math.Mod(float64(count), float64(target)) != 0 {
+				sched = false
+			}
+		}
+
+		if sched {
+			exec := true
+			if v, found := m.mruns[s]; found {
+				if v == true {
+					trace("Exact sched: should exec once (already executed).")
+					exec = false
+				}
+			}
+
+			if exec {
+				trace("Execute:", items2)
+				rlf.Println("Execute", items2)
+				_, err := localExec(items2)
+				if err != nil {
+					trace(err)
+				}
+			}
+
+			if target == 0 {
+				// We store this line since for the 'exact time' type of schedule, we need to exec
+				// only once per every minute tick. For the 'every x time' type, we don't mind.
+				//
+				// Example, if the sched is * 1 * * *, that means once every hour. Since our tick is
+				//per minute, this will normally execute once per min at 1:00am (total of 60 execs).
+				activeLinesExact[s] = true
+				m.mruns[s] = true
 			}
 		}
 
@@ -666,14 +795,35 @@ func handleMainExecute(m *svcContext, count uint64) error {
 		trace("\n")
 	}
 
+	// Cleanup mruns
+	var delkeys []string
+	for k, v := range m.mruns {
+		_, active := activeLinesExact[k]
+		if !active && v == true {
+			delkeys = append(delkeys, k)
+		}
+	}
+
+	if len(delkeys) > 0 {
+		for _, k := range delkeys {
+			delete(m.mruns, k)
+		}
+	}
+
+	for k, v := range m.mruns {
+		trace("key: ", k, ", val: ", v)
+	}
+
+	trace("----------\n")
 	return nil
 }
 
 func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
+	m.mruns = map[string]bool{}
 	tickdef := 1 * time.Minute
-	var cntr uint64
+	var cntr uint64 = 0
 	var busy int32
 
 	// Start our main http interface
@@ -695,7 +845,6 @@ func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		graceful.Run(":8080", 5*time.Second, n)
 	}()
 
-	cntr = 0
 	maintick := time.Tick(tickdef)
 	slowtick := time.Tick(2 * time.Second)
 	tick := maintick
