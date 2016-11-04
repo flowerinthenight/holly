@@ -8,7 +8,36 @@ A simple, cron-like Windows service with an http interface. I use this tool to m
 
 Prior to this service, I have been using the task scheduler for running periodic tasks. Over time, it proved to be cumbersome to manage especially with lots of VM's involved.
 
-This service runs command lines periodically as its main function. A [`run.conf`](./run.conf) configuration file is provided. The lowest timer tick value support is 1 minute. Read the `run.conf` comments for more information.
+This service runs command lines periodically as its main function. A [`run.conf`](./run.conf) configuration file is provided. The lowest timer tick value support is 1 minute.
+
+```
+┌───────────── min (0 - 59)
+│ ┌─────────── hour (0 - 23)
+│ │ ┌───────── day of month (1 - 31)
+│ │ │ ┌─────── month (1 - 12)
+│ │ │ │ ┌───── day of week (0 - 6) (0 to 6 are Sunday to Saturday
+│ │ │ │ │
+* * * * * command to execute
+
+Examples:
+
+Run every minute:
+* * * * * cmd.exe /arg1 /arg2 "arg with space" /sampledir "path\to\something"
+
+Run every 5 minutes:
+*/5 * * * * cmd.exe /arg1 /arg2 "arg with space" /sampledir "path\to\something"
+
+Run every 2 hours:
+* */2 * * * cmd.exe /arg1 /arg2 "arg with space" /sampledir "path\to\something"
+
+Run every Aug 28 at 8:00am:
+0 8 28 8 * file.exe -arg1 -arg2
+
+Run every Saturday at 10 mins interval:
+*/10 * * * 6 file.exe --arg1 --arg2
+```
+
+Check out [`run.conf`](./run.conf) configuration for more information. 
 
 ## Update self
 
