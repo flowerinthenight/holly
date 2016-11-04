@@ -790,7 +790,8 @@ func handleMainExecute(m *svcContext, count uint64) error {
 				// only once per every minute tick. For the 'every x time' type, we don't mind.
 				//
 				// Example, if the sched is * 1 * * *, that means once every hour. Since our tick is
-				//per minute, this will normally execute once per min at 1:00am (total of 60 execs).
+				// per minute, this will normally execute once per min at 1:00am (total of 60 execs).
+				// We don't want that to happen.
 				activeLinesExact[s] = true
 				m.mruns[s] = true
 			}
