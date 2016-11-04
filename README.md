@@ -97,6 +97,8 @@ Quite a dangerous feature, though. Remember that this service runs under SYSTEM 
 n1.exe exec --cmd [cmd-to-execute] --host [ip]
 ```
 
+The service will also capture the console output (if cmd is console-based) and sent it back to client.
+
 Since `cmd` will be executed from service session, it is not interactive by default. To run an interactive command, use [`n1.exe`](https://github.com/flowerinthenight/n1)'s `--interactive=true` option.
 
 ```
