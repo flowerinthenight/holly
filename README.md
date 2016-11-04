@@ -64,7 +64,7 @@ n1.exe update --file [new-gitlab-runner-exe] --hosts [ip1, ip2, ip3, ...] runner
 Same with updating the service itself, without the reboot.
 
 ```
-n1.exe update --file [new-gitlab-runner-exe] --hosts [ip1, ip2, ip3, ...] conf
+n1.exe update --file [new-run-conf-file] --hosts [ip1, ip2, ip3, ...] conf
 ```
 
 ## Upload file
