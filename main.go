@@ -19,6 +19,7 @@ import (
 
 const internalVersion = "1.8"
 const svcName = "holly"
+const usage = "Simple command scheduler (Windows service)"
 
 var (
 	mod  *syscall.LazyDLL
@@ -54,6 +55,8 @@ func main() {
 		MaxAge:     30,
 	})
 
+	rlf.Println("Starting holly:", usage)
+
 	proc = nil
 	lib := filepath.Dir(path) + `\disptrace.dll`
 	if _, err := os.Stat(lib); os.IsNotExist(err) {
@@ -76,7 +79,7 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = svcName
-	app.Usage = "Simple command scheduler (Windows service)"
+	app.Usage = usage
 	app.Version = internalVersion
 	app.Copyright = "(c) 2016 Chew Esmero."
 	app.Commands = []cli.Command{
