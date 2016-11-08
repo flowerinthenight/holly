@@ -48,7 +48,7 @@ func main() {
 	// Initialize rotating logs
 	path, _ := getModuleFileName()
 	initRotatingLog(&lumberjack.Logger{
-		Dir:        path,
+		Dir:        filepath.Dir(path),
 		MaxSize:    500,
 		MaxBackups: 3,
 		MaxAge:     30,
