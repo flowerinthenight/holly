@@ -782,6 +782,7 @@ func handleMainExecute(m *svcContext, count uint64) error {
 				_, err := localExec(items2)
 				if err != nil {
 					trace(err)
+					rlf.Println(err)
 				}
 			}
 
