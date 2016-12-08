@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,23 +29,67 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/debug"
 	"golang.org/x/sys/windows/svc/eventlog"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var elog debug.Log
+var (
+	elog debug.Log
+	mod  *syscall.LazyDLL
+	proc *syscall.LazyProc
+)
 
 type svcContext struct {
+	mod   *syscall.LazyDLL
+	proc  *syscall.LazyProc
+	rlf   *log.Logger // rotating logs (service level)
+	etw   bool        // etw tracing
 	conf  string
 	busy  int32           // 0 = idle; 1 = busy
 	mruns map[string]bool // run state for cmd lines
 }
 
+// Note call this first right after service context is created so we have a logger as early as possible.
+func (ctx *svcContext) initRotatingLog(out io.Writer) {
+	ctx.rlf = log.New(out, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile)
+}
+
+func (ctx *svcContext) initTraceLib(path string) error {
+	lib := filepath.Dir(path) + `\disptrace.dll`
+	if _, err := os.Stat(lib); os.IsNotExist(err) {
+		ctx.rlf.Println("Cannot find disptrace.dll.")
+		return fmt.Errorf("Cannot find disptrace.dll.")
+	} else {
+		mod = syscall.NewLazyDLL(lib)
+		proc = mod.NewProc("ETWTrace")
+		ctx.etw = true
+	}
+
+	ctx.rlf.Println("ETW tracer initialized.")
+	return nil
+}
+
+// ETW trace log.
+func (ctx *svcContext) trace(v ...interface{}) {
+	if !ctx.etw {
+		return
+	}
+
+	// Log only when trace library is present.
+	pc, _, _, _ := runtime.Caller(1)
+	fn := runtime.FuncForPC(pc)
+	fno := regexp.MustCompile(`^.*\.(.*)$`)
+	fnName := fno.ReplaceAllString(fn.Name(), "$1")
+	m := fmt.Sprint(v...)
+	_, _, _ = proc.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("[" + fnName + "] " + m))))
+}
+
 // Run process as SYSTEM in the same session as winlogon.exe, not session 0.
-func runInteractive(cmd string, args string, wait bool, waitms int) (uint32, error) {
+func (ctx *svcContext) runInteractive(cmd string, args string, wait bool, waitms int) (uint32, error) {
 	var exitCode uint32
 	path, _ := getModuleFileName()
 	lib := filepath.Dir(path) + `\libcore.dll`
 	if _, err := os.Stat(lib); os.IsNotExist(err) {
-		trace(err)
+		ctx.trace(err)
 		return uint32(syscall.ENOENT), fmt.Errorf("Cannot find libcore.dll.")
 	}
 
@@ -52,7 +98,7 @@ func runInteractive(cmd string, args string, wait bool, waitms int) (uint32, err
 		shouldWait = 0
 	}
 
-	trace("run: ", cmd, " ", args)
+	ctx.trace("run: ", cmd, " ", args)
 	var runUser = syscall.MustLoadDLL(lib).MustFindProc("StartSystemUserProcess")
 	_, _, err := runUser.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(cmd))), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(args))), 0, uintptr(unsafe.Pointer(&exitCode)), uintptr(shouldWait), uintptr(waitms))
 	return exitCode, err
@@ -88,7 +134,8 @@ func getModuleFileName() (string, error) {
 	return string(utf16.Decode(b[0:n])), nil
 }
 
-func localExec(args []string) (string, error) {
+// Execute a command line.
+func localExec(ctx *svcContext, args []string) (string, error) {
 	var outStr string
 	var out bytes.Buffer
 	var err error
@@ -97,7 +144,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -105,7 +152,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -113,7 +160,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -121,7 +168,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -129,7 +176,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -137,7 +184,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -145,7 +192,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -153,7 +200,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -161,7 +208,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -169,7 +216,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -177,7 +224,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -185,7 +232,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -193,7 +240,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -201,7 +248,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -209,7 +256,7 @@ func localExec(args []string) (string, error) {
 		c := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14])
 		c.Stdout = &out
 		if err = c.Run(); err != nil {
-			trace(err.Error())
+			ctx.trace(err.Error())
 		} else {
 			outStr = out.String()
 		}
@@ -218,17 +265,17 @@ func localExec(args []string) (string, error) {
 	return outStr, err
 }
 
-func setUpdateSelfAfterReboot(old string, new string) error {
+func setUpdateSelfAfterReboot(ctx *svcContext, old string, new string) error {
 	var MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
 	var sysproc = syscall.MustLoadDLL("kernel32.dll").MustFindProc("MoveFileExW")
 	o, err := syscall.UTF16PtrFromString(old)
 	if err != nil {
-		trace(err.Error())
+		ctx.trace(err.Error())
 	}
 
 	n, err := syscall.UTF16PtrFromString(new)
 	if err != nil {
-		trace(err.Error())
+		ctx.trace(err.Error())
 	}
 
 	_, _, _ = sysproc.Call(uintptr(unsafe.Pointer(o)), 0, uintptr(MOVEFILE_DELAY_UNTIL_REBOOT))
@@ -238,10 +285,11 @@ func setUpdateSelfAfterReboot(old string, new string) error {
 	return nil
 }
 
-func rebootSystem() error {
+// Note that user has no option to cancel since this is from session 0.
+func rebootSystem(ctx *svcContext) error {
 	c := exec.Command("shutdown", "/r", "/t", "10")
 	if err := c.Run(); err != nil {
-		trace(err.Error())
+		ctx.trace(err.Error())
 		return err
 	}
 
@@ -253,7 +301,7 @@ func restartSelf() error {
 	return nil
 }
 
-func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
+func handlePostUpdateGitlabRunner(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
@@ -264,7 +312,7 @@ func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
 
 		defer file.Close()
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		trace(str)
+		ctx.trace(str)
 		path, _ := getModuleFileName()
 		_, fstr := filepath.Split(handler.Filename)
 		fstr = filepath.Dir(path) + `\` + fstr
@@ -280,11 +328,11 @@ func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
 		// Replace the runner exe
 		retry := 10
 		runner := `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
-		trace(runner + ` --> ` + fstr)
+		ctx.trace(runner + ` --> ` + fstr)
 		for i := 0; i < retry; i++ {
 			c := exec.Command(runner, "stop")
 			if err := c.Run(); err != nil {
-				trace("retry:", i, err)
+				ctx.trace("retry:", i, err)
 				if i >= retry-1 {
 					http.Error(w, "stop: "+err.Error(), 500)
 					return
@@ -297,7 +345,7 @@ func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
 		for i := 0; i < retry; i++ {
 			c := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
 			if err := c.Run(); err != nil {
-				trace("retry:", i, err)
+				ctx.trace("retry:", i, err)
 				if i >= retry-1 {
 					http.Error(w, "copy: "+err.Error(), 500)
 					return
@@ -312,7 +360,7 @@ func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
 			for i := 0; i < retry; i++ {
 				c := exec.Command(runner, "start")
 				if err := c.Run(); err != nil {
-					trace("retry:", i, err)
+					ctx.trace("retry:", i, err)
 					if i >= retry-1 {
 						http.Error(w, "start: "+err.Error(), 500)
 						return
@@ -327,7 +375,7 @@ func handlePostUpdateGitlabRunner(m *svcContext) http.HandlerFunc {
 	})
 }
 
-func handlePostUpdateConf(m *svcContext) http.HandlerFunc {
+func handlePostUpdateConf(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
@@ -337,10 +385,10 @@ func handlePostUpdateConf(m *svcContext) http.HandlerFunc {
 		}
 
 		defer file.Close()
-		atomic.StoreInt32(&m.busy, 1)
-		defer atomic.StoreInt32(&m.busy, 0)
+		atomic.StoreInt32(&ctx.busy, 1)
+		defer atomic.StoreInt32(&ctx.busy, 0)
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		trace(str)
+		ctx.trace(str)
 		path, _ := getModuleFileName()
 		_, fstr := filepath.Split(handler.Filename)
 		fstr = filepath.Dir(path) + `\` + fstr
@@ -356,7 +404,7 @@ func handlePostUpdateConf(m *svcContext) http.HandlerFunc {
 	})
 }
 
-func handlePostUpdateSelf(m *svcContext) http.HandlerFunc {
+func handlePostUpdateSelf(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		// By default, we reboot after setup update. To cancel, we need reboot=false param.
@@ -377,7 +425,7 @@ func handlePostUpdateSelf(m *svcContext) http.HandlerFunc {
 
 		defer file.Close()
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		trace(str)
+		ctx.trace(str)
 		path, _ := getModuleFileName()
 		_, fstr := filepath.Split(handler.Filename)
 		fstr = filepath.Dir(path) + `\` + fstr + `_new`
@@ -390,16 +438,16 @@ func handlePostUpdateSelf(m *svcContext) http.HandlerFunc {
 		defer f.Close()
 		io.Copy(f, file)
 		fmt.Fprintf(w, "Self update applied after reboot.")
-		trace(path + ` --> ` + fstr)
-		err = setUpdateSelfAfterReboot(path, fstr)
+		ctx.trace(path + ` --> ` + fstr)
+		err = setUpdateSelfAfterReboot(ctx, path, fstr)
 		if reboot {
-			trace("Rebooting system...")
-			rebootSystem()
+			ctx.trace("Rebooting system...")
+			rebootSystem(ctx)
 		}
 	})
 }
 
-func handleGetInternalVersion(m *svcContext) http.HandlerFunc {
+func handleGetInternalVersion(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, internalVersion)
 	})
@@ -407,7 +455,7 @@ func handleGetInternalVersion(m *svcContext) http.HandlerFunc {
 
 // This is quite dangerous since we can execute virtually any command, considering that this service
 // is running as SYSTEM account in session 0.
-func handleGetExec(m *svcContext) http.HandlerFunc {
+func handleGetExec(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		body, err := ioutil.ReadAll(r.Body)
@@ -418,7 +466,7 @@ func handleGetExec(m *svcContext) http.HandlerFunc {
 
 		defer r.Body.Close()
 		cmd := fmt.Sprintf("%s", body)
-		trace(cmd)
+		ctx.trace(cmd)
 		args := strings.Split(cmd, " ")
 
 		interactive, ok := q["interactive"]
@@ -439,16 +487,16 @@ func handleGetExec(m *svcContext) http.HandlerFunc {
 					}
 				}
 
-				trace("cmd: ", args[0])
-				trace("args (joined): ", strings.Join(args[1:], " "))
-				r, err := runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
-				trace("return: ", r, ", err: ", err)
+				ctx.trace("cmd: ", args[0])
+				ctx.trace("args (joined): ", strings.Join(args[1:], " "))
+				r, err := ctx.runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
+				ctx.trace("return: ", r, ", err: ", err)
 				fmt.Fprintf(w, `[`+cmd+`]`+"\n"+" return: %d, err: "+err.Error(), r)
 				return
 			}
 		}
 
-		res, err := localExec(args)
+		res, err := localExec(ctx, args)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -458,7 +506,7 @@ func handleGetExec(m *svcContext) http.HandlerFunc {
 	})
 }
 
-func handlePostUpload(m *svcContext) http.HandlerFunc {
+func handlePostUpload(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reply string
 		r.ParseMultipartForm(32 << 20)
@@ -470,9 +518,9 @@ func handlePostUpload(m *svcContext) http.HandlerFunc {
 
 		defer file.Close()
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		trace(str)
+		ctx.trace(str)
 		path := r.FormValue("path")
-		trace("path: " + path)
+		ctx.trace("path: " + path)
 		if path == "root" {
 			fp, _ := getModuleFileName()
 			_, fstr := filepath.Split(handler.Filename)
@@ -504,7 +552,7 @@ func handlePostUpload(m *svcContext) http.HandlerFunc {
 	})
 }
 
-func handleGetFileStat(m *svcContext) http.HandlerFunc {
+func handleGetFileStat(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var out string
 		body, err := ioutil.ReadAll(r.Body)
@@ -515,10 +563,10 @@ func handleGetFileStat(m *svcContext) http.HandlerFunc {
 
 		defer r.Body.Close()
 		files := fmt.Sprintf("%s", body)
-		trace(files)
+		ctx.trace(files)
 		fl := strings.Split(files, ",")
 		for _, f := range fl {
-			trace(f)
+			ctx.trace(f)
 			out += `[` + f + `]` + "\n"
 			stats, err := os.Stat(f)
 			if err != nil {
@@ -536,7 +584,7 @@ func handleGetFileStat(m *svcContext) http.HandlerFunc {
 	})
 }
 
-func handleGetReadFile(m *svcContext) http.HandlerFunc {
+func handleGetReadFile(ctx *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var out string
 		body, err := ioutil.ReadAll(r.Body)
@@ -547,8 +595,8 @@ func handleGetReadFile(m *svcContext) http.HandlerFunc {
 
 		defer r.Body.Close()
 		file := fmt.Sprintf("%s", body)
-		trace(file)
-		trace(file)
+		ctx.trace(file)
+		ctx.trace(file)
 		out += `[` + file + `]` + "\n"
 		data, err := ioutil.ReadFile(file)
 		if err != nil {
@@ -563,7 +611,7 @@ func handleGetReadFile(m *svcContext) http.HandlerFunc {
 
 // Returns true if the command line is scheduled (should run). The second value is the total target minutes when
 // the schedule option takes the '*/frequency' form. If zero, that means, the scheduled time is specific.
-func isCmdLineScheduled(line string) (bool, uint64) {
+func isCmdLineScheduled(ctx *svcContext, line string) (bool, uint64) {
 	star5 := 0 // special case
 	var target uint64 = 0
 	mults := [5]uint64{
@@ -583,7 +631,7 @@ func isCmdLineScheduled(line string) (bool, uint64) {
 		int(time.Now().Weekday()),
 	}
 
-	trace("reftime: ", tms)
+	ctx.trace("reftime: ", tms)
 	r := fmt.Sprintf("^(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)\\s(%d|\\*|\\*/\\d+)",
 		tms[0],
 		tms[1],
@@ -591,7 +639,7 @@ func isCmdLineScheduled(line string) (bool, uint64) {
 		tms[3],
 		tms[4])
 
-	trace("regexp: ", r)
+	ctx.trace("regexp: ", r)
 	items := strings.Split(line, " ")
 	match, _ := regexp.MatchString(r, line)
 	if match {
@@ -663,8 +711,8 @@ func isCmdLineScheduled(line string) (bool, uint64) {
 			target = 1
 		}
 
-		trace("evals: ", evals)
-		trace("target: ", target)
+		ctx.trace("evals: ", evals)
+		ctx.trace("target: ", target)
 		return valid, target
 	}
 
@@ -672,20 +720,20 @@ func isCmdLineScheduled(line string) (bool, uint64) {
 }
 
 // Main service function.
-func handleMainExecute(m *svcContext, count uint64) error {
-	atomic.StoreInt32(&m.busy, 1)
-	defer atomic.StoreInt32(&m.busy, 0)
+func handleMainExecute(ctx *svcContext, count uint64) error {
+	atomic.StoreInt32(&ctx.busy, 1)
+	defer atomic.StoreInt32(&ctx.busy, 0)
 
 	path, err := getModuleFileName()
 	if err != nil {
-		trace(err.Error())
+		ctx.trace(err.Error())
 		return err
 	}
 
 	dir, _ := filepath.Abs(filepath.Dir(path))
 	lines, err := readLines(dir + "\\run.conf")
 	if err != nil {
-		trace(err.Error())
+		ctx.trace(err.Error())
 		return err
 	}
 
@@ -705,7 +753,7 @@ func handleMainExecute(m *svcContext, count uint64) error {
 		}
 
 		items := strings.Split(s, " ")
-		trace(items)
+		ctx.trace(items)
 		for i, e := range items {
 			if len(e) == 0 {
 				continue
@@ -721,9 +769,9 @@ func handleMainExecute(m *svcContext, count uint64) error {
 		}
 
 		// Extract double-quoted arguments
-		trace("Double-quoted arguments indeces:")
+		ctx.trace("Double-quoted arguments indeces:")
 		tr := fmt.Sprintf("  start:%v, end:%v", start, end)
-		trace(tr)
+		ctx.trace(tr)
 		for i, e := range start {
 			s2 = append(s2, strings.Join(items[e:end[i]+1], " "))
 		}
@@ -752,16 +800,21 @@ func handleMainExecute(m *svcContext, count uint64) error {
 			}
 		}
 
-		trace("Arguments list:")
+		// Should be at least sched params + a single cmd.
+		if len(items2) < 6 {
+			continue
+		}
+
+		ctx.trace("Arguments list:")
 		items2 = append(items2[:0], items2[5:]...)
 		for _, e := range items2 {
-			trace("  " + e)
+			ctx.trace("  " + e)
 		}
 
 		// Run the command line
-		sched, target := isCmdLineScheduled(s)
+		sched, target := isCmdLineScheduled(ctx, s)
 		if target > 0 {
-			trace("count: ", count)
+			ctx.trace("count: ", count)
 			if math.Mod(float64(count), float64(target)) != 0 {
 				sched = false
 			}
@@ -769,20 +822,20 @@ func handleMainExecute(m *svcContext, count uint64) error {
 
 		if sched {
 			exec := true
-			if v, found := m.mruns[s]; found {
+			if v, found := ctx.mruns[s]; found {
 				if v == true {
-					trace("Exact sched: should exec once (already executed).")
+					ctx.trace("Exact sched: should exec once (already executed).")
 					exec = false
 				}
 			}
 
 			if exec {
-				trace("Execute:", items2)
-				rlf.Println("Execute", items2)
-				_, err := localExec(items2)
+				ctx.trace("Execute:", items2)
+				ctx.rlf.Println("Execute", items2)
+				_, err := localExec(ctx, items2)
 				if err != nil {
-					trace(err)
-					rlf.Println(err)
+					ctx.trace(err)
+					ctx.rlf.Println(err)
 				}
 			}
 
@@ -794,19 +847,19 @@ func handleMainExecute(m *svcContext, count uint64) error {
 				// per minute, this will normally execute once per min at 1:00am (total of 60 execs).
 				// We don't want that to happen.
 				activeLinesExact[s] = true
-				m.mruns[s] = true
+				ctx.mruns[s] = true
 			}
 		}
 
 		s2 = nil
 		start = nil
 		end = nil
-		trace("\n")
+		ctx.trace("\n")
 	}
 
 	// Cleanup mruns
 	var delkeys []string
-	for k, v := range m.mruns {
+	for k, v := range ctx.mruns {
 		_, active := activeLinesExact[k]
 		if !active && v == true {
 			delkeys = append(delkeys, k)
@@ -815,22 +868,23 @@ func handleMainExecute(m *svcContext, count uint64) error {
 
 	if len(delkeys) > 0 {
 		for _, k := range delkeys {
-			delete(m.mruns, k)
+			delete(ctx.mruns, k)
 		}
 	}
 
-	for k, v := range m.mruns {
-		trace("key: ", k, ", val: ", v)
+	for k, v := range ctx.mruns {
+		ctx.trace("key: ", k, ", val: ", v)
 	}
 
-	trace("----------\n")
+	ctx.trace("----------\n")
 	return nil
 }
 
-func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+// Our service's main function.
+func (ctx *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
-	m.mruns = map[string]bool{}
+	ctx.mruns = map[string]bool{}
 	tickdef := 1 * time.Minute
 	var cntr uint64 = 0
 	var busy int32
@@ -840,17 +894,17 @@ func (m *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		mux := mux.NewRouter()
 		// API version 1
 		v1 := mux.PathPrefix("/api/v1").Subrouter()
-		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(m))
-		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(m))
-		v1.Methods("GET").Path("/readfile").Handler(handleGetReadFile(m))
-		v1.Methods("GET").Path("/exec").Handler(handleGetExec(m))
-		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(m))
-		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(m))
-		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(m))
-		v1.Methods("POST").Path("/upload").Handler(handlePostUpload(m))
+		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(ctx))
+		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(ctx))
+		v1.Methods("GET").Path("/readfile").Handler(handleGetReadFile(ctx))
+		v1.Methods("GET").Path("/exec").Handler(handleGetExec(ctx))
+		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(ctx))
+		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(ctx))
+		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(ctx))
+		v1.Methods("POST").Path("/upload").Handler(handlePostUpload(ctx))
 		n := negroni.Classic()
 		n.UseHandler(mux)
-		trace("Launching http interface...")
+		ctx.trace("Launching http interface...")
 		graceful.Run(":8080", 5*time.Second, n)
 	}()
 
@@ -867,11 +921,11 @@ loop:
 				cntr = 1
 			}
 
-			busy = atomic.LoadInt32(&m.busy)
+			busy = atomic.LoadInt32(&ctx.busy)
 			if busy == 0 {
-				go func(m *svcContext, count uint64) {
-					handleMainExecute(m, count)
-				}(m, cntr)
+				go func(ctx *svcContext, count uint64) {
+					handleMainExecute(ctx, count)
+				}(ctx, cntr)
 			}
 		case c := <-r:
 			switch c.Cmd {
@@ -916,7 +970,27 @@ func runService(name string, conf string, isDebug bool) {
 		run = debug.Run
 	}
 
-	err = run(name, &svcContext{conf: conf, busy: 0})
+	ctx := svcContext{proc: nil, conf: conf, busy: 0, etw: false}
+	path, _ := getModuleFileName()
+
+	// Initialize rotating logs
+	ctx.initRotatingLog(&lumberjack.Logger{
+		Dir:        filepath.Dir(path),
+		NameFormat: "holly.log",
+		MaxSize:    500,
+		MaxBackups: 3,
+		MaxAge:     30,
+	})
+
+	// Initialize ETW tracer (for debug)
+	err = ctx.initTraceLib(path)
+	if err != nil {
+		log.Println("Failed to initialize ETW tracing: %v", err)
+	}
+
+	ctx.trace("Starting holly service:", usage)
+	ctx.rlf.Println("Starting holly service:", usage)
+	err = run(name, &ctx)
 	if err != nil {
 		elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
 		return
