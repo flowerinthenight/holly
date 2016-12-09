@@ -86,144 +86,73 @@ func (c *svcContext) runInteractive(cmd string, args string, wait bool, waitms i
 
 	c.trace("run: ", cmd, " ", args)
 	var runUser = syscall.MustLoadDLL(lib).MustFindProc("StartSystemUserProcess")
-	_, _, err := runUser.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(cmd))), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(args))), 0, uintptr(unsafe.Pointer(&exitCode)), uintptr(shouldWait), uintptr(waitms))
+	_, _, err := runUser.Call(
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(cmd))),
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(args))),
+		0,
+		uintptr(unsafe.Pointer(&exitCode)),
+		uintptr(shouldWait),
+		uintptr(waitms))
 	return exitCode, err
 }
 
-func (c *svcContext) execute(args []string) (string, error) {
-	var outStr string
+type cmdRunner struct {
+	console string
+	err     error
+}
+
+func (r *cmdRunner) run(cmd *exec.Cmd) {
 	var out bytes.Buffer
-	var err error
+	cmd.Stdout = &out
+	r.err = cmd.Run()
+	if r.err == nil {
+		r.console = out.String()
+	}
+}
+
+// Up to 15 args only. I don't know how to make this dynamic.
+func (c *svcContext) execute(args []string) (string, error) {
+	cr := cmdRunner{}
 	switch len(args) {
 	case 1:
-		ec := exec.Command(args[0])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0]))
 	case 2:
-		ec := exec.Command(args[0], args[1])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1]))
 	case 3:
-		ec := exec.Command(args[0], args[1], args[2])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2]))
 	case 4:
-		ec := exec.Command(args[0], args[1], args[2], args[3])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3]))
 	case 5:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4]))
 	case 6:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5]))
 	case 7:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6]))
 	case 8:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]))
 	case 9:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]))
 	case 10:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]))
 	case 11:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10]))
 	case 12:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11]))
 	case 13:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12]))
 	case 14:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13]))
 	case 15:
-		ec := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14])
-		ec.Stdout = &out
-		if err = ec.Run(); err != nil {
-			c.trace(err.Error())
-		} else {
-			outStr = out.String()
-		}
+		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14]))
 	}
 
-	return outStr, err
+	return cr.console, cr.err
 }
 
 // Note that user has no option to cancel since this is from session 0.
 func (c *svcContext) rebootSystem() error {
-	ec := exec.Command("shutdown", "/r", "/t", "10")
-	if err := ec.Run(); err != nil {
+	cmd := exec.Command("shutdown", "/r", "/t", "10")
+	if err := cmd.Run(); err != nil {
 		c.trace(err.Error())
 		return err
 	}
@@ -279,8 +208,8 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		runner := `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
 		c.trace(runner + ` --> ` + fstr)
 		for i := 0; i < retry; i++ {
-			ec := exec.Command(runner, "stop")
-			if err := ec.Run(); err != nil {
+			cmd := exec.Command(runner, "stop")
+			if err := cmd.Run(); err != nil {
 				c.trace("retry:", i, err)
 				if i >= retry-1 {
 					http.Error(w, "stop: "+err.Error(), 500)
@@ -292,8 +221,8 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		}
 
 		for i := 0; i < retry; i++ {
-			ec := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
-			if err := ec.Run(); err != nil {
+			cmd := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
+			if err := cmd.Run(); err != nil {
 				c.trace("retry:", i, err)
 				if i >= retry-1 {
 					http.Error(w, "copy: "+err.Error(), 500)
@@ -307,8 +236,8 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		// Restart service regardless of update result status
 		defer func() {
 			for i := 0; i < retry; i++ {
-				ec := exec.Command(runner, "start")
-				if err := ec.Run(); err != nil {
+				cmd := exec.Command(runner, "start")
+				if err := cmd.Run(); err != nil {
 					c.trace("retry:", i, err)
 					if i >= retry-1 {
 						http.Error(w, "start: "+err.Error(), 500)
@@ -447,6 +376,7 @@ func handleGetExec(c *svcContext) http.HandlerFunc {
 
 		res, err := c.execute(args)
 		if err != nil {
+			c.trace(err)
 			http.Error(w, err.Error(), 500)
 			return
 		}
