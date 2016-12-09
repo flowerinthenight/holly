@@ -25,8 +25,8 @@ import (
 	"github.com/tylerb/graceful"
 	"github.com/urfave/negroni"
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/debug"
-	"golang.org/x/sys/windows/svc/eventlog"
+	_ "golang.org/x/sys/windows/svc/debug"
+	_ "golang.org/x/sys/windows/svc/eventlog"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -65,7 +65,6 @@ func newEtw() *etw {
 type svcContext struct {
 	*log.Logger                 // rotating logs (service level) using lumberjack
 	*etw                        // embedded etw tracer
-	debug.Log                   // windows event logger
 	busy        int32           // 0 = idle; 1 = busy
 	mruns       map[string]bool // run state for cmd lines
 }
@@ -893,7 +892,7 @@ loop:
 				changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 				tick = maintick
 			default:
-				c.Error(1, fmt.Sprintf("unexpected control request #%d", cr))
+				c.Println("Unexpected control request #", cr)
 			}
 		}
 	}
@@ -902,56 +901,29 @@ loop:
 	return
 }
 
-// Windows event logger.
-func initEventLog(name string, isDebug bool) debug.Log {
-	var err error
-	var elog debug.Log
-	if isDebug {
-		elog = debug.New(name)
-	} else {
-		elog, err = eventlog.Open(name)
-		if err != nil {
-			return nil
-		}
-	}
-
-	return elog
-}
-
-func runService(name string, conf string, isDebug bool) {
+func runService(name string) {
+	// Create our main service context with etw and rotating logger.
 	path, _ := getModuleFileName()
-	rlf := &lumberjack.Logger{
-		Dir:        filepath.Dir(path),
-		NameFormat: "holly.log",
-		MaxSize:    500,
-		MaxBackups: 3,
-		MaxAge:     30,
-	}
-
-	// Create our main service context with etw and rotating logger. We also
-	// store the elog so we can have a reference outside of this function.
 	ctx := svcContext{
-		Logger: log.New(rlf, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile),
-		etw:    newEtw(),
-		Log:    initEventLog(name, isDebug),
-		busy:   0,
+		Logger: log.New(&lumberjack.Logger{
+			Dir:        filepath.Dir(path),
+			NameFormat: "holly.log",
+			MaxSize:    500,
+			MaxBackups: 3,
+			MaxAge:     30,
+		}, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile),
+		etw:  newEtw(),
+		busy: 0,
 	}
 
-	defer ctx.Log.Close()
-	ctx.Info(1, fmt.Sprintf("starting %s service", name))
+	ctx.trace("Starting service: ", name)
+	ctx.Println("Starting service:", name)
 	run := svc.Run
-	if isDebug {
-		run = debug.Run
-	}
-
-	s := fmt.Sprintf("Starting holly service: %s", usage)
-	ctx.trace(s)
-	ctx.Println(s)
 	err := run(name, &ctx)
 	if err != nil {
-		ctx.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
+		ctx.Println("Service failed:", err)
 		return
 	}
 
-	ctx.Info(1, fmt.Sprintf("%s service stopped", name))
+	ctx.Println("Service stopped:", name)
 }

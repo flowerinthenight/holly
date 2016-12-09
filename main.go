@@ -21,7 +21,7 @@ func main() {
 	}
 
 	if !isIntSess {
-		runService(svcName, "", false)
+		runService(svcName)
 		return
 	}
 
@@ -31,14 +31,6 @@ func main() {
 	app.Version = internalVersion
 	app.Copyright = "(c) 2016 Chew Esmero."
 	app.Commands = []cli.Command{
-		{
-			Name:  "debug",
-			Usage: "run service (debug enabled)",
-			Action: func(c *cli.Context) error {
-				runService(svcName, "", true)
-				return nil
-			},
-		},
 		{
 			Name:  "install",
 			Usage: "install service",
