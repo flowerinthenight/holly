@@ -153,7 +153,7 @@ func (c *svcContext) execute(args []string) (string, error) {
 func (c *svcContext) rebootSystem() error {
 	cmd := exec.Command("shutdown", "/r", "/t", "10")
 	if err := cmd.Run(); err != nil {
-		c.trace(err.Error())
+		c.trace(err)
 		return err
 	}
 
@@ -165,12 +165,12 @@ func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
 	var sysproc = syscall.MustLoadDLL("kernel32.dll").MustFindProc("MoveFileExW")
 	o, err := syscall.UTF16PtrFromString(old)
 	if err != nil {
-		c.trace(err.Error())
+		c.trace(err)
 	}
 
 	n, err := syscall.UTF16PtrFromString(new)
 	if err != nil {
-		c.trace(err.Error())
+		c.trace(err)
 	}
 
 	// Register file replacements.
@@ -211,7 +211,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		for i := 0; i < retry; i++ {
 			cmd := exec.Command(runner, "stop")
 			if err := cmd.Run(); err != nil {
-				c.trace("retry:", i, err)
+				c.trace("retry: ", i, ": ", err)
 				if i >= retry-1 {
 					http.Error(w, "stop: "+err.Error(), 500)
 					return
@@ -224,7 +224,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		for i := 0; i < retry; i++ {
 			cmd := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
 			if err := cmd.Run(); err != nil {
-				c.trace("retry:", i, err)
+				c.trace("retry: ", i, ": ", err)
 				if i >= retry-1 {
 					http.Error(w, "copy: "+err.Error(), 500)
 					return
@@ -239,7 +239,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 			for i := 0; i < retry; i++ {
 				cmd := exec.Command(runner, "start")
 				if err := cmd.Run(); err != nil {
-					c.trace("retry:", i, err)
+					c.trace("retry: ", i, ": ", err)
 					if i >= retry-1 {
 						http.Error(w, "start: "+err.Error(), 500)
 						return
@@ -477,7 +477,6 @@ func handleGetReadFile(c *svcContext) http.HandlerFunc {
 		defer r.Body.Close()
 		file := fmt.Sprintf("%s", body)
 		c.trace(file)
-		c.trace(file)
 		out += `[` + file + `]` + "\n"
 		data, err := ioutil.ReadFile(file)
 		if err != nil {
@@ -606,14 +605,14 @@ func handleMainExecute(c *svcContext, count uint64) error {
 
 	path, err := getModuleFileName()
 	if err != nil {
-		c.trace(err.Error())
+		c.trace(err)
 		return err
 	}
 
 	dir, _ := filepath.Abs(filepath.Dir(path))
 	lines, err := readLines(dir + "\\run.conf")
 	if err != nil {
-		c.trace(err.Error())
+		c.trace(err)
 		return err
 	}
 
@@ -710,7 +709,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 			}
 
 			if exec {
-				c.trace("Execute:", items2)
+				c.trace("Execute: ", items2)
 				c.Println("Execute", items2)
 				_, err := c.execute(items2)
 				if err != nil {
@@ -762,6 +761,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 
 // Our service's main function.
 func (c *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+	c.trace("Starting service: ", svcName)
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
 	c.mruns = map[string]bool{}
@@ -783,7 +783,7 @@ func (c *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		v1.Methods("POST").Path("/upload").Handler(handlePostUpload(c))
 		n := negroni.Classic()
 		n.UseHandler(mux)
-		c.trace("Launching http interface...")
+		c.trace("Launching http interface.")
 		graceful.Run(":8080", 5*time.Second, n)
 	}()
 
@@ -802,17 +802,17 @@ loop:
 
 			busy = atomic.LoadInt32(&c.busy)
 			if busy == 0 {
-				go func(c *svcContext, count uint64) {
-					handleMainExecute(c, count)
+				go func(ctx *svcContext, count uint64) {
+					handleMainExecute(ctx, count)
 				}(c, cntr)
 			}
-		case cr := <-r:
-			switch cr.Cmd {
+		case crq := <-r:
+			switch crq.Cmd {
 			case svc.Interrogate:
-				changes <- cr.CurrentStatus
+				changes <- crq.CurrentStatus
 				// Testing deadlock from https://code.google.com/p/winsvc/issues/detail?id=4
 				time.Sleep(100 * time.Millisecond)
-				changes <- cr.CurrentStatus
+				changes <- crq.CurrentStatus
 			case svc.Stop, svc.Shutdown:
 				break loop
 			case svc.Pause:
@@ -822,7 +822,7 @@ loop:
 				changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 				tick = maintick
 			default:
-				c.Println("Unexpected control request #", cr)
+				c.trace("Unexpected control request #", crq)
 			}
 		}
 	}
@@ -834,26 +834,27 @@ loop:
 func runService(name string) {
 	// Create our main service context with etw tracer and rotating logger.
 	path, _ := getModuleFileName()
-	ctx := svcContext{
-		Logger: log.New(&lumberjack.Logger{
-			Dir:        filepath.Dir(path),
-			NameFormat: "holly.log",
-			MaxSize:    500,
-			MaxBackups: 3,
-			MaxAge:     30,
-		}, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile),
-		etw:  newEtw(),
-		busy: 0,
+	rlf := &lumberjack.Logger{
+		Dir:        filepath.Dir(path),
+		NameFormat: "holly.log",
+		MaxSize:    500,
+		MaxBackups: 3,
+		MaxAge:     30,
 	}
 
-	ctx.trace("Starting service: ", name)
-	ctx.Println("Starting service:", name)
+	ctx := svcContext{
+		Logger: log.New(rlf, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile),
+		etw:    newEtw(),
+		busy:   0,
+	}
+
+	defer rlf.Close()
 	run := svc.Run
 	err := run(name, &ctx)
 	if err != nil {
-		ctx.Println("Service failed:", err)
+		ctx.trace("Service failed: ", err)
 		return
 	}
 
-	ctx.Println("Service stopped:", name)
+	ctx.trace("Service stopped: ", name)
 }
