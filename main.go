@@ -29,7 +29,7 @@ func main() {
 	app.Name = svcName
 	app.Usage = usage
 	app.Version = internalVersion
-	app.Copyright = "(c) 2016 TeraRecon Inc."
+	app.Copyright = "(c) 2016 Chew Esmero."
 	app.Commands = []cli.Command{
 		{
 			Name:  "debug",
