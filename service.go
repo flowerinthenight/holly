@@ -173,6 +173,7 @@ func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
 		c.trace(err.Error())
 	}
 
+	// Register file replacements.
 	_, _, _ = sysproc.Call(uintptr(unsafe.Pointer(o)), 0, uintptr(MOVEFILE_DELAY_UNTIL_REBOOT))
 	_, _, _ = sysproc.Call(uintptr(unsafe.Pointer(n)), uintptr(unsafe.Pointer(o)), uintptr(MOVEFILE_DELAY_UNTIL_REBOOT))
 	_, _, _ = sysproc.Call(uintptr(unsafe.Pointer(n)), 0, uintptr(MOVEFILE_DELAY_UNTIL_REBOOT))
@@ -203,7 +204,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		defer f.Close()
 		io.Copy(f, file)
 
-		// Replace the runner exe
+		// Replace the runner exe.
 		retry := 10
 		runner := `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
 		c.trace(runner + ` --> ` + fstr)
@@ -233,7 +234,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 			}
 		}
 
-		// Restart service regardless of update result status
+		// Restart service regardless of update result status.
 		defer func() {
 			for i := 0; i < retry; i++ {
 				cmd := exec.Command(runner, "start")
@@ -621,12 +622,12 @@ func handleMainExecute(c *svcContext, count uint64) error {
 	for _, str := range lines {
 		s := strings.TrimSpace(str)
 		var s2 []string
-		// Skip blank lines
+		// Skip blank lines...
 		if len(str) == 0 {
 			continue
 		}
 
-		// and comments
+		// and comments.
 		if s[0] == '#' {
 			continue
 		}
@@ -647,7 +648,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 			}
 		}
 
-		// Extract double-quoted arguments
+		// Extract double-quoted arguments.
 		c.trace("Double-quoted arguments indeces:")
 		tr := fmt.Sprintf("  start:%v, end:%v", start, end)
 		c.trace(tr)
@@ -655,7 +656,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 			s2 = append(s2, strings.Join(items[e:end[i]+1], " "))
 		}
 
-		// Reconstruct arguments list
+		// Reconstruct arguments list.
 		var items2 []string
 		skip := false
 		j := 0
@@ -690,7 +691,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 			c.trace("  " + e)
 		}
 
-		// Run the command line
+		// Run the command line.
 		sched, target := isCmdLineScheduled(c, s)
 		if target > 0 {
 			c.trace("count: ", count)
@@ -719,7 +720,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 			}
 
 			if target == 0 {
-				// We store this line since for the 'exact time' type of schedule, we need to exec
+				// We store this line since for the 'exact time' type of schedule, we need to execute
 				// only once per every minute tick. For the 'every x time' type, we don't mind.
 				//
 				// Example, if the sched is * 1 * * *, that means once every hour. Since our tick is
@@ -736,7 +737,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 		c.trace("\n")
 	}
 
-	// Cleanup mruns
+	// Cleanup mruns.
 	var delkeys []string
 	for k, v := range c.mruns {
 		_, active := activeLinesExact[k]
@@ -768,10 +769,9 @@ func (c *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	var cntr uint64 = 0
 	var busy int32
 
-	// Start our main http interface
+	// Start our main http interface.
 	go func() {
 		mux := mux.NewRouter()
-		// API version 1
 		v1 := mux.PathPrefix("/api/v1").Subrouter()
 		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(c))
 		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(c))
@@ -832,7 +832,7 @@ loop:
 }
 
 func runService(name string) {
-	// Create our main service context with etw and rotating logger.
+	// Create our main service context with etw tracer and rotating logger.
 	path, _ := getModuleFileName()
 	ctx := svcContext{
 		Logger: log.New(&lumberjack.Logger{
