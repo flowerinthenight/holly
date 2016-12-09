@@ -2,15 +2,8 @@
 package main
 
 import (
-	_ "fmt"
-	_ "io"
 	"log"
 	"os"
-	_ "path/filepath"
-	_ "regexp"
-	_ "runtime"
-	_ "syscall"
-	_ "unsafe"
 
 	"github.com/urfave/cli"
 	"golang.org/x/sys/windows/svc"
@@ -36,7 +29,7 @@ func main() {
 	app.Name = svcName
 	app.Usage = usage
 	app.Version = internalVersion
-	app.Copyright = "(c) 2016 Chew Esmero."
+	app.Copyright = "(c) 2016 TeraRecon Inc."
 	app.Commands = []cli.Command{
 		{
 			Name:  "debug",
