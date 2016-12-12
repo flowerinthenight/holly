@@ -9,9 +9,12 @@ import (
 	"golang.org/x/sys/windows/svc"
 )
 
-const internalVersion = "1.9"
-const svcName = "holly"
-const usage = "Simple command scheduler (Windows service)"
+const (
+	svcName         = "holly"
+	internalVersion = "1.10"
+	usage           = "Simple command scheduler (Windows service)"
+	copyright       = "(c) 2016 Chew Esmero."
+)
 
 func main() {
 	isIntSess, err := svc.IsAnInteractiveSession()
@@ -29,7 +32,7 @@ func main() {
 	app.Name = svcName
 	app.Usage = usage
 	app.Version = internalVersion
-	app.Copyright = "(c) 2016 Chew Esmero."
+	app.Copyright = copyright
 	app.Commands = []cli.Command{
 		{
 			Name:  "install",

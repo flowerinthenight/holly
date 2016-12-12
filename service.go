@@ -1,4 +1,3 @@
-// +build windows
 package main
 
 import (
@@ -96,6 +95,23 @@ func (c *svcContext) runInteractive(cmd string, args string, wait bool, waitms i
 	return exitCode, err
 }
 
+func (c *svcContext) isProcessActive(name string) bool {
+	cmd := exec.Command("c:/windows/system32/tasklist.exe", "/fo", "csv", "/nh")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmd.Output()
+	if err != nil {
+		c.trace(err)
+		return false
+	}
+
+	s := strings.ToLower(fmt.Sprintf("%s", out))
+	if strings.Contains(s, strings.ToLower(name)) {
+		return true
+	}
+
+	return false
+}
+
 type cmdRunner struct {
 	console string
 	err     error
@@ -149,7 +165,7 @@ func (c *svcContext) execute(args []string) (string, error) {
 	return cr.console, cr.err
 }
 
-// Note that user has no option to cancel since this is from session 0.
+// Note that user has no option to cancel since this is from session 0. Default to 10 seconds.
 func (c *svcContext) rebootSystem() error {
 	cmd := exec.Command("shutdown", "/r", "/t", "10")
 	if err := cmd.Run(); err != nil {
@@ -182,6 +198,8 @@ func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
 
 func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		runner := `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
+		retry := 10
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
 		if err != nil {
@@ -204,51 +222,52 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		defer f.Close()
 		io.Copy(f, file)
 
+		// Restart service regardless of update result status.
+		defer func() {
+			for i := 0; i < retry; i++ {
+				cmd := exec.Command(runner, "start")
+				err := cmd.Run()
+				if err == nil {
+					break
+				}
+
+				c.trace("retry: ", i, ": ", err)
+				if i >= retry-1 {
+					http.Error(w, "start: "+err.Error(), 500)
+					return
+				}
+			}
+		}()
+
 		// Replace the runner exe.
-		retry := 10
-		runner := `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
 		c.trace(runner + ` --> ` + fstr)
 		for i := 0; i < retry; i++ {
 			cmd := exec.Command(runner, "stop")
-			if err := cmd.Run(); err != nil {
-				c.trace("retry: ", i, ": ", err)
-				if i >= retry-1 {
-					http.Error(w, "stop: "+err.Error(), 500)
-					return
-				}
-			} else {
+			err := cmd.Run()
+			if err == nil {
 				break
+			}
+
+			c.trace("retry: ", i, ": ", err)
+			if i >= retry-1 {
+				http.Error(w, "stop: "+err.Error(), 500)
+				return
 			}
 		}
 
 		for i := 0; i < retry; i++ {
 			cmd := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
-			if err := cmd.Run(); err != nil {
-				c.trace("retry: ", i, ": ", err)
-				if i >= retry-1 {
-					http.Error(w, "copy: "+err.Error(), 500)
-					return
-				}
-			} else {
+			err := cmd.Run()
+			if err == nil {
 				break
 			}
-		}
 
-		// Restart service regardless of update result status.
-		defer func() {
-			for i := 0; i < retry; i++ {
-				cmd := exec.Command(runner, "start")
-				if err := cmd.Run(); err != nil {
-					c.trace("retry: ", i, ": ", err)
-					if i >= retry-1 {
-						http.Error(w, "start: "+err.Error(), 500)
-						return
-					}
-				} else {
-					break
-				}
+			c.trace("retry: ", i, ": ", err)
+			if i >= retry-1 {
+				http.Error(w, "copy: "+err.Error(), 500)
+				return
 			}
-		}()
+		}
 
 		fmt.Fprintf(w, "GitLab runner updated.")
 	})
@@ -598,7 +617,6 @@ func isCmdLineScheduled(c *svcContext, line string) (bool, uint64) {
 	return false, 0
 }
 
-// Main service function.
 func handleMainExecute(c *svcContext, count uint64) error {
 	atomic.StoreInt32(&c.busy, 1)
 	defer atomic.StoreInt32(&c.busy, 0)
@@ -759,7 +777,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 	return nil
 }
 
-// Our service's main function.
+// Our service's main worker function.
 func (c *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	c.trace("Starting service: ", svcName)
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
