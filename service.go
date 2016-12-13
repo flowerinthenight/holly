@@ -210,8 +210,7 @@ func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
 
 func handleHttpGetInternalVersion(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var data = []byte(`{"version":"` + internalVersion + `"}`)
-		w.Write(data)
+		w.Write([]byte(`{"version":"` + internalVersion + `"}`))
 	})
 }
 
@@ -269,8 +268,7 @@ func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd strin
 		c.trace(ip, "args (joined): ", strings.Join(args[1:], " "))
 		r, err := c.runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
 		c.trace(ip, "return: ", r, ", err: ", err)
-		data := []byte(`{"cmd":"` + cmd + `","return":"` + fmt.Sprintf("%s", r) + `","error":"` + err.Error() + `"}`)
-		w.Write(data)
+		w.Write([]byte(`{"cmd":"` + cmd + `","return":"` + fmt.Sprintf("%s", r) + `","error":"` + err.Error() + `"}`))
 		return
 	}
 
@@ -281,8 +279,7 @@ func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd strin
 		return
 	}
 
-	data := []byte(`{"cmd":"` + cmd + `","result":"` + res + `"}`)
-	w.Write(data)
+	w.Write([]byte(`{"cmd":"` + cmd + `","result":"` + res + `"}`))
 }
 
 func handleHttpGetFileStat(c *svcContext) http.HandlerFunc {
@@ -347,6 +344,7 @@ func handleHttpGetReadFile(c *svcContext) http.HandlerFunc {
 			return
 		}
 
+		// Just send the raw contents as reply.
 		w.Write(data)
 	})
 }
@@ -354,9 +352,12 @@ func handleHttpGetReadFile(c *svcContext) http.HandlerFunc {
 // Update self binary. This, by default, reboots the system. To cancel, use 'reboot=false' param.
 func handleHttpPostUpdateSelf(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr + ` | ` // for logging
+		var (
+			ip     string = r.RemoteAddr + ` | ` // for logging
+			reboot bool   = true
+		)
+
 		q := r.URL.Query()
-		reboot := true
 		rb, ok := q["reboot"]
 		if ok {
 			if rb[0] == "false" {
@@ -387,9 +388,7 @@ func handleHttpPostUpdateSelf(c *svcContext) http.HandlerFunc {
 		io.Copy(f, file)
 		c.trace(ip, path+` --> `+fstr)
 		// Send reply first before triggering reboot (if needed).
-		data := []byte(`{"result":"Self update applied.","reboot":"` + fmt.Sprintf("%v", reboot) + `"}`)
-		w.Write(data)
-		// Actual update and reboot.
+		w.Write([]byte(`{"result":"Self update applied.","reboot":"` + fmt.Sprintf("%v", reboot) + `"}`))
 		err = c.setUpdateSelfAfterReboot(path, fstr)
 		if reboot {
 			c.trace(ip, "Rebooting system...")
@@ -475,8 +474,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 			}
 		}
 
-		data := []byte(`{"result":"GitLab runner updated."}`)
-		w.Write(data)
+		w.Write([]byte(`{"result":"GitLab runner updated."}`))
 	})
 }
 
@@ -506,19 +504,14 @@ func handleHttpPostUpdateConf(c *svcContext) http.HandlerFunc {
 
 		defer f.Close()
 		io.Copy(f, file)
-		data := []byte(`{"result":"Config file updated."}`)
-		w.Write(data)
+		w.Write([]byte(`{"result":"Config file updated."}`))
 	})
 }
 
 // Upload any file to some location.
 func handleHttpPostUpload(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var (
-			ip    string = r.RemoteAddr + ` | ` // for logging
-			reply string
-		)
-
+		ip := r.RemoteAddr + ` | ` // for logging
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
 		if err != nil {
@@ -531,35 +524,24 @@ func handleHttpPostUpload(c *svcContext) http.HandlerFunc {
 		c.trace(ip, str)
 		path := r.FormValue("path")
 		c.trace("path: " + path)
+		_, fstr := filepath.Split(handler.Filename)
 		if path == "root" {
 			fp, _ := getModuleFileName()
-			_, fstr := filepath.Split(handler.Filename)
 			fstr = filepath.Dir(fp) + `\` + fstr
-			f, err := os.Create(fstr)
-			if err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-
-			defer f.Close()
-			io.Copy(f, file)
-			reply = fstr
 		} else {
-			_, fstr := filepath.Split(handler.Filename)
 			fstr = path + `\` + fstr
-			f, err := os.Create(fstr)
-			if err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-
-			defer f.Close()
-			io.Copy(f, file)
-			reply = fstr
 		}
 
-		data := []byte(`{"file":"` + reply + `"}`)
-		w.Write(data)
+		f, err := os.Create(fstr)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer f.Close()
+		io.Copy(f, file)
+		// Send full path of file as reply.
+		w.Write([]byte(`{"file":"` + fstr + `"}`))
 	})
 }
 
