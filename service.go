@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -28,6 +30,10 @@ import (
 	_ "golang.org/x/sys/windows/svc/eventlog"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+type httpContextValue struct {
+	ipaddr string
+}
 
 type etw struct {
 	mod  *syscall.LazyDLL
@@ -70,7 +76,6 @@ type svcContext struct {
 
 // Run process as SYSTEM in the same session as winlogon.exe, not session 0.
 func (c *svcContext) runInteractive(cmd string, args string, wait bool, waitms int) (uint32, error) {
-	var exitCode uint32
 	path, _ := getModuleFileName()
 	lib := filepath.Dir(path) + `\libcore.dll`
 	if _, err := os.Stat(lib); os.IsNotExist(err) {
@@ -78,13 +83,17 @@ func (c *svcContext) runInteractive(cmd string, args string, wait bool, waitms i
 		return uint32(syscall.ENOENT), fmt.Errorf("Cannot find libcore.dll.")
 	}
 
+	var (
+		exitCode uint32
+		runUser  = syscall.MustLoadDLL(lib).MustFindProc("StartSystemUserProcess")
+	)
+
 	shouldWait := 1
 	if !wait {
 		shouldWait = 0
 	}
 
 	c.trace("run: ", cmd, " ", args)
-	var runUser = syscall.MustLoadDLL(lib).MustFindProc("StartSystemUserProcess")
 	_, _, err := runUser.Call(
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(cmd))),
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(args))),
@@ -177,8 +186,11 @@ func (c *svcContext) rebootSystem() error {
 }
 
 func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
-	var MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
-	var sysproc = syscall.MustLoadDLL("kernel32.dll").MustFindProc("MoveFileExW")
+	var (
+		sysproc                     = syscall.MustLoadDLL("kernel32.dll").MustFindProc("MoveFileExW")
+		MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
+	)
+
 	o, err := syscall.UTF16PtrFromString(old)
 	if err != nil {
 		c.trace(err)
@@ -196,10 +208,162 @@ func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
 	return nil
 }
 
-func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
+func handleHttpGetInternalVersion(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		runner := `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
-		retry := 10
+		var data = []byte(`{"version":"` + internalVersion + `"}`)
+		w.Write(data)
+	})
+}
+
+func handleHttpGetExec(c *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			interactive bool = false
+			wait        bool = true
+			waitms      int  = 5000
+		)
+
+		q := r.URL.Query()
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer r.Body.Close()
+		cmd := fmt.Sprintf("%s", body)
+		qi, ok := q["interactive"]
+		if ok {
+			if qi[0] == "true" {
+				interactive = true
+				// The 'wait' and 'waitms' args are only valid when 'interactive' is true.
+				if val, ok := q["wait"]; ok {
+					if val[0] == "false" {
+						wait = false
+					}
+				}
+
+				if val, ok := q["waitms"]; ok {
+					ms, err := strconv.Atoi(val[0])
+					if err == nil {
+						waitms = ms
+					}
+				}
+			}
+		}
+
+		v := httpContextValue{ipaddr: r.RemoteAddr}
+		ctx := context.WithValue(context.Background(), "data", v)
+		doExec(ctx, c, w, cmd, interactive, wait, waitms)
+	})
+}
+
+// This is quite dangerous since we can execute virtually any command, considering that this service
+// is running as SYSTEM account in session 0.
+func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd string, interactive, wait bool, waitms int) {
+	ip := ctx.Value("data").(httpContextValue).ipaddr + ` | `
+	c.trace(ip, cmd)
+	args := strings.Split(cmd, " ")
+	if interactive {
+		c.trace(ip, "cmd: ", args[0])
+		c.trace(ip, "args (joined): ", strings.Join(args[1:], " "))
+		r, err := c.runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
+		c.trace(ip, "return: ", r, ", err: ", err)
+		data := []byte(`{"cmd":"` + cmd + `","return":"` + fmt.Sprintf("%s", r) + `","error":"` + err.Error() + `"}`)
+		w.Write(data)
+		return
+	}
+
+	res, err := c.execute(args)
+	if err != nil {
+		c.trace(ip, err)
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	data := []byte(`{"cmd":"` + cmd + `","result":"` + res + `"}`)
+	w.Write(data)
+}
+
+func handleHttpGetFileStat(c *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			data string                        // data string
+			ip   string = r.RemoteAddr + ` | ` // for logging
+		)
+
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer r.Body.Close()
+		files := fmt.Sprintf("%s", body)
+		c.trace(ip, files)
+		fl := strings.Split(files, ",")
+		var fss = map[string]string{}
+		for _, f := range fl {
+			c.trace(ip, f)
+			stats, err := os.Stat(f)
+			if err != nil {
+				data += err.Error()
+			} else {
+				data += "name:" + stats.Name() + ","
+				data += "size:" + fmt.Sprintf("%v", stats.Size()) + ","
+				data += "mode:" + fmt.Sprintf("%v", stats.Mode()) + ","
+				data += "modtime:" + fmt.Sprintf("%v", stats.ModTime()) + ","
+				data += "isdir:" + fmt.Sprintf("%v", stats.IsDir())
+			}
+
+			fss[f] = data
+			data = ""
+		}
+
+		payload, err := json.Marshal(fss)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+		} else {
+			w.Write(payload)
+		}
+	})
+}
+
+func handleHttpGetReadFile(c *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr + ` | ` // for logging
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer r.Body.Close()
+		file := fmt.Sprintf("%s", body)
+		c.trace(ip, file)
+		data, err := ioutil.ReadFile(file)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		w.Write(data)
+	})
+}
+
+// Update self binary. This, by default, reboots the system. To cancel, use 'reboot=false' param.
+func handleHttpPostUpdateSelf(c *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr + ` | ` // for logging
+		q := r.URL.Query()
+		reboot := true
+		rb, ok := q["reboot"]
+		if ok {
+			if rb[0] == "false" {
+				reboot = false
+			}
+		}
+
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
 		if err != nil {
@@ -209,7 +373,49 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 
 		defer file.Close()
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		c.trace(str)
+		c.trace(ip, str)
+		path, _ := getModuleFileName()
+		_, fstr := filepath.Split(handler.Filename)
+		fstr = filepath.Dir(path) + `\` + fstr + `_new`
+		f, err := os.Create(fstr)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer f.Close()
+		io.Copy(f, file)
+		c.trace(ip, path+` --> `+fstr)
+		// Send reply first before triggering reboot (if needed).
+		data := []byte(`{"result":"Self update applied.","reboot":"` + fmt.Sprintf("%v", reboot) + `"}`)
+		w.Write(data)
+		// Actual update and reboot.
+		err = c.setUpdateSelfAfterReboot(path, fstr)
+		if reboot {
+			c.trace(ip, "Rebooting system...")
+			c.rebootSystem()
+		}
+	})
+}
+
+func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			ip     string = r.RemoteAddr + ` | ` // for logging
+			runner string = `c:\runner\gitlab-ci-multi-runner-windows-amd64.exe`
+			retry  int    = 10
+		)
+
+		r.ParseMultipartForm(32 << 20)
+		file, handler, err := r.FormFile("uploadfile")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		defer file.Close()
+		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
+		c.trace(ip, str)
 		path, _ := getModuleFileName()
 		_, fstr := filepath.Split(handler.Filename)
 		fstr = filepath.Dir(path) + `\` + fstr
@@ -231,7 +437,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 					break
 				}
 
-				c.trace("retry: ", i, ": ", err)
+				c.trace(ip, "retry: ", i, ": ", err)
 				if i >= retry-1 {
 					http.Error(w, "start: "+err.Error(), 500)
 					return
@@ -240,7 +446,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		}()
 
 		// Replace the runner exe.
-		c.trace(runner + ` --> ` + fstr)
+		c.trace(ip, runner+` --> `+fstr)
 		for i := 0; i < retry; i++ {
 			cmd := exec.Command(runner, "stop")
 			err := cmd.Run()
@@ -248,7 +454,7 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 				break
 			}
 
-			c.trace("retry: ", i, ": ", err)
+			c.trace(ip, "retry: ", i, ": ", err)
 			if i >= retry-1 {
 				http.Error(w, "stop: "+err.Error(), 500)
 				return
@@ -262,19 +468,21 @@ func handlePostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 				break
 			}
 
-			c.trace("retry: ", i, ": ", err)
+			c.trace(ip, "retry: ", i, ": ", err)
 			if i >= retry-1 {
 				http.Error(w, "copy: "+err.Error(), 500)
 				return
 			}
 		}
 
-		fmt.Fprintf(w, "GitLab runner updated.")
+		data := []byte(`{"result":"GitLab runner updated."}`)
+		w.Write(data)
 	})
 }
 
-func handlePostUpdateConf(c *svcContext) http.HandlerFunc {
+func handleHttpPostUpdateConf(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr + ` | ` // for logging
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
 		if err != nil {
@@ -286,7 +494,7 @@ func handlePostUpdateConf(c *svcContext) http.HandlerFunc {
 		atomic.StoreInt32(&c.busy, 1)
 		defer atomic.StoreInt32(&c.busy, 0)
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		c.trace(str)
+		c.trace(ip, str)
 		path, _ := getModuleFileName()
 		_, fstr := filepath.Split(handler.Filename)
 		fstr = filepath.Dir(path) + `\` + fstr
@@ -298,117 +506,19 @@ func handlePostUpdateConf(c *svcContext) http.HandlerFunc {
 
 		defer f.Close()
 		io.Copy(f, file)
-		fmt.Fprintf(w, "Config file updated.")
-	})
-}
-
-// Update self binary. This, by default, reboots the system. To cancel, use 'reboot=false' param.
-func handlePostUpdateSelf(c *svcContext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		reboot := true
-		rb, ok := q["reboot"]
-		if ok {
-			if rb[0] == "false" {
-				reboot = false
-			}
-		}
-
-		r.ParseMultipartForm(32 << 20)
-		file, handler, err := r.FormFile("uploadfile")
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer file.Close()
-		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		c.trace(str)
-		path, _ := getModuleFileName()
-		_, fstr := filepath.Split(handler.Filename)
-		fstr = filepath.Dir(path) + `\` + fstr + `_new`
-		f, err := os.Create(fstr)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer f.Close()
-		io.Copy(f, file)
-		fmt.Fprintf(w, "Self update applied after reboot.")
-		c.trace(path + ` --> ` + fstr)
-		err = c.setUpdateSelfAfterReboot(path, fstr)
-		if reboot {
-			c.trace("Rebooting system...")
-			c.rebootSystem()
-		}
-	})
-}
-
-func handleGetInternalVersion(c *svcContext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, internalVersion)
-	})
-}
-
-// This is quite dangerous since we can execute virtually any command, considering that this service
-// is running as SYSTEM account in session 0.
-func handleGetExec(c *svcContext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer r.Body.Close()
-		cmd := fmt.Sprintf("%s", body)
-		c.trace(cmd)
-		args := strings.Split(cmd, " ")
-
-		interactive, ok := q["interactive"]
-		if ok {
-			if interactive[0] == "true" {
-				wait := true
-				waitms := 5000
-				if val, ok := q["wait"]; ok {
-					if val[0] == "false" {
-						wait = false
-					}
-				}
-
-				if val, ok := q["waitms"]; ok {
-					ms, err := strconv.Atoi(val[0])
-					if err == nil {
-						waitms = ms
-					}
-				}
-
-				c.trace("cmd: ", args[0])
-				c.trace("args (joined): ", strings.Join(args[1:], " "))
-				r, err := c.runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
-				c.trace("return: ", r, ", err: ", err)
-				fmt.Fprintf(w, `[`+cmd+`]`+"\n"+" return: %d, err: "+err.Error(), r)
-				return
-			}
-		}
-
-		res, err := c.execute(args)
-		if err != nil {
-			c.trace(err)
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		fmt.Fprintf(w, `[`+cmd+`]`+"\n"+res)
+		data := []byte(`{"result":"Config file updated."}`)
+		w.Write(data)
 	})
 }
 
 // Upload any file to some location.
-func handlePostUpload(c *svcContext) http.HandlerFunc {
+func handleHttpPostUpload(c *svcContext) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reply string
+		var (
+			ip    string = r.RemoteAddr + ` | ` // for logging
+			reply string
+		)
+
 		r.ParseMultipartForm(32 << 20)
 		file, handler, err := r.FormFile("uploadfile")
 		if err != nil {
@@ -418,7 +528,7 @@ func handlePostUpload(c *svcContext) http.HandlerFunc {
 
 		defer file.Close()
 		str := fmt.Sprintf("Handler.Header: %v", handler.Header)
-		c.trace(str)
+		c.trace(ip, str)
 		path := r.FormValue("path")
 		c.trace("path: " + path)
 		if path == "root" {
@@ -433,7 +543,7 @@ func handlePostUpload(c *svcContext) http.HandlerFunc {
 
 			defer f.Close()
 			io.Copy(f, file)
-			reply = "File copied: " + fstr
+			reply = fstr
 		} else {
 			_, fstr := filepath.Split(handler.Filename)
 			fstr = path + `\` + fstr
@@ -445,64 +555,10 @@ func handlePostUpload(c *svcContext) http.HandlerFunc {
 
 			defer f.Close()
 			io.Copy(f, file)
-			reply = "File copied: " + fstr
+			reply = fstr
 		}
 
-		fmt.Fprintf(w, reply)
-	})
-}
-
-func handleGetFileStat(c *svcContext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var out string
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer r.Body.Close()
-		files := fmt.Sprintf("%s", body)
-		c.trace(files)
-		fl := strings.Split(files, ",")
-		for _, f := range fl {
-			c.trace(f)
-			out += `[` + f + `]` + "\n"
-			stats, err := os.Stat(f)
-			if err != nil {
-				out += err.Error()
-			} else {
-				out += "Name: " + stats.Name() + "\n"
-				out += "Size: " + fmt.Sprintf("%v", stats.Size()) + "\n"
-				out += "Mode: " + fmt.Sprintf("%v", stats.Mode()) + "\n"
-				out += "ModTime: " + fmt.Sprintf("%v", stats.ModTime()) + "\n"
-				out += "IsDir: " + fmt.Sprintf("%v", stats.IsDir()) + "\n"
-			}
-
-			fmt.Fprintf(w, out)
-		}
-	})
-}
-
-func handleGetReadFile(c *svcContext) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var out string
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		defer r.Body.Close()
-		file := fmt.Sprintf("%s", body)
-		c.trace(file)
-		out += `[` + file + `]` + "\n"
-		data, err := ioutil.ReadFile(file)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
+		data := []byte(`{"file":"` + reply + `"}`)
 		w.Write(data)
 	})
 }
@@ -784,21 +840,24 @@ func (c *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	changes <- svc.Status{State: svc.StartPending}
 	c.mruns = map[string]bool{}
 	tickdef := 1 * time.Minute
-	var cntr uint64 = 0
-	var busy int32
+
+	var (
+		cntr uint64 = 0
+		busy int32
+	)
 
 	// Start our main http interface.
 	go func() {
 		mux := mux.NewRouter()
 		v1 := mux.PathPrefix("/api/v1").Subrouter()
-		v1.Methods("GET").Path("/version").Handler(handleGetInternalVersion(c))
-		v1.Methods("GET").Path("/filestat").Handler(handleGetFileStat(c))
-		v1.Methods("GET").Path("/readfile").Handler(handleGetReadFile(c))
-		v1.Methods("GET").Path("/exec").Handler(handleGetExec(c))
-		v1.Methods("POST").Path("/update/self").Handler(handlePostUpdateSelf(c))
-		v1.Methods("POST").Path("/update/runner").Handler(handlePostUpdateGitlabRunner(c))
-		v1.Methods("POST").Path("/update/conf").Handler(handlePostUpdateConf(c))
-		v1.Methods("POST").Path("/upload").Handler(handlePostUpload(c))
+		v1.Methods("GET").Path("/version").Handler(handleHttpGetInternalVersion(c))
+		v1.Methods("GET").Path("/exec").Handler(handleHttpGetExec(c))
+		v1.Methods("GET").Path("/filestat").Handler(handleHttpGetFileStat(c))
+		v1.Methods("GET").Path("/readfile").Handler(handleHttpGetReadFile(c))
+		v1.Methods("POST").Path("/update/self").Handler(handleHttpPostUpdateSelf(c))
+		v1.Methods("POST").Path("/update/runner").Handler(handleHttpPostUpdateGitlabRunner(c))
+		v1.Methods("POST").Path("/update/conf").Handler(handleHttpPostUpdateConf(c))
+		v1.Methods("POST").Path("/upload").Handler(handleHttpPostUpload(c))
 		n := negroni.Classic()
 		n.UseHandler(mux)
 		c.trace("Launching http interface.")
