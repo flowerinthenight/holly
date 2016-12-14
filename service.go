@@ -381,6 +381,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 					break
 				}
 
+				c.trace(err)
 				if i >= retry-1 {
 					http.Error(w, "start: "+err.Error(), 500)
 					return
@@ -407,6 +408,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 				break
 			}
 
+			c.trace(err)
 			if i >= retry-1 {
 				http.Error(w, "stop: "+err.Error(), 500)
 				return
@@ -416,7 +418,13 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		// Replace the runner exe.
 		for i := 0; i < retry; i++ {
 			c.trace(ip, "attempt (copy): ", i)
-			cmd := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
+			cmd := exec.Command(
+				"c:\\windows\\system32\\cmd.exe",
+				"/c",
+				"copy",
+				"/Y",
+				fstr,
+				filepath.Dir(runner)+`\`)
 			out, err := cmd.Output()
 			if err == nil {
 				sout := fmt.Sprintf("out: %s", out)
@@ -424,6 +432,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 				break
 			}
 
+			c.trace(err)
 			if i >= retry-1 {
 				http.Error(w, "copy: "+err.Error(), 500)
 				return
