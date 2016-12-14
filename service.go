@@ -74,53 +74,6 @@ type svcContext struct {
 	mruns       map[string]bool // run state for cmd lines
 }
 
-// Run process as SYSTEM in the same session as winlogon.exe, not session 0.
-func (c *svcContext) runInteractive(cmd string, args string, wait bool, waitms int) (uint32, error) {
-	path, _ := getModuleFileName()
-	lib := filepath.Dir(path) + `\libcore.dll`
-	if _, err := os.Stat(lib); os.IsNotExist(err) {
-		c.trace(err)
-		return uint32(syscall.ENOENT), fmt.Errorf("Cannot find libcore.dll.")
-	}
-
-	var (
-		exitCode uint32
-		runUser  = syscall.MustLoadDLL(lib).MustFindProc("StartSystemUserProcess")
-	)
-
-	shouldWait := 1
-	if !wait {
-		shouldWait = 0
-	}
-
-	c.trace("run: ", cmd, " ", args)
-	_, _, err := runUser.Call(
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(cmd))),
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(args))),
-		0,
-		uintptr(unsafe.Pointer(&exitCode)),
-		uintptr(shouldWait),
-		uintptr(waitms))
-	return exitCode, err
-}
-
-func (c *svcContext) isProcessActive(name string) bool {
-	cmd := exec.Command("c:/windows/system32/tasklist.exe", "/fo", "csv", "/nh")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.Output()
-	if err != nil {
-		c.trace(err)
-		return false
-	}
-
-	s := strings.ToLower(fmt.Sprintf("%s", out))
-	if strings.Contains(s, strings.ToLower(name)) {
-		return true
-	}
-
-	return false
-}
-
 type cmdRunner struct {
 	console string
 	err     error
@@ -172,17 +125,6 @@ func (c *svcContext) execute(args []string) (string, error) {
 	}
 
 	return cr.console, cr.err
-}
-
-// Note that user has no option to cancel since this is from session 0. Default to 10 seconds.
-func (c *svcContext) rebootSystem() error {
-	cmd := exec.Command("shutdown", "/r", "/t", "10")
-	if err := cmd.Run(); err != nil {
-		c.trace(err)
-		return err
-	}
-
-	return nil
 }
 
 func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
@@ -266,7 +208,7 @@ func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd strin
 	if interactive {
 		c.trace(ip, "cmd: ", args[0])
 		c.trace(ip, "args (joined): ", strings.Join(args[1:], " "))
-		r, err := c.runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
+		r, err := runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
 		c.trace(ip, "return: ", r, ", err: ", err)
 		w.Write([]byte(`{"cmd":"` + cmd + `","return":"` + fmt.Sprintf("%s", r) + `","error":"` + err.Error() + `"}`))
 		return
@@ -392,7 +334,7 @@ func handleHttpPostUpdateSelf(c *svcContext) http.HandlerFunc {
 		err = c.setUpdateSelfAfterReboot(path, fstr)
 		if reboot {
 			c.trace(ip, "Rebooting system...")
-			c.rebootSystem()
+			rebootSystem()
 		}
 	})
 }
@@ -430,13 +372,15 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		// Restart service regardless of update result status.
 		defer func() {
 			for i := 0; i < retry; i++ {
+				c.trace(ip, "attempt (start): ", i)
 				cmd := exec.Command(runner, "start")
-				err := cmd.Run()
+				out, err := cmd.Output()
 				if err == nil {
+					sout := fmt.Sprintf("out: %s", out)
+					c.trace(sout)
 					break
 				}
 
-				c.trace(ip, "retry: ", i, ": ", err)
 				if i >= retry-1 {
 					http.Error(w, "start: "+err.Error(), 500)
 					return
@@ -444,30 +388,42 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 			}
 		}()
 
-		// Replace the runner exe.
+		// Don't do anything if runner is active.
+		if isRunnerActive() {
+			c.trace(ip, "Runner is active. Skip update.")
+			w.Write([]byte(`{"result":"GitLab runner active. Skip update."}`))
+			return
+		}
+
+		// Stop the runner service.
 		c.trace(ip, runner+` --> `+fstr)
 		for i := 0; i < retry; i++ {
+			c.trace(ip, "attempt (stop): ", i)
 			cmd := exec.Command(runner, "stop")
-			err := cmd.Run()
+			out, err := cmd.Output()
 			if err == nil {
+				sout := fmt.Sprintf("out: %s", out)
+				c.trace(sout)
 				break
 			}
 
-			c.trace(ip, "retry: ", i, ": ", err)
 			if i >= retry-1 {
 				http.Error(w, "stop: "+err.Error(), 500)
 				return
 			}
 		}
 
+		// Replace the runner exe.
 		for i := 0; i < retry; i++ {
+			c.trace(ip, "attempt (copy): ", i)
 			cmd := exec.Command("cmd", "/c", "copy", "/Y", fstr, filepath.Dir(runner)+`\`)
-			err := cmd.Run()
+			out, err := cmd.Output()
 			if err == nil {
+				sout := fmt.Sprintf("out: %s", out)
+				c.trace(sout)
 				break
 			}
 
-			c.trace(ip, "retry: ", i, ": ", err)
 			if i >= retry-1 {
 				http.Error(w, "copy: "+err.Error(), 500)
 				return
