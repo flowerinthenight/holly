@@ -813,7 +813,7 @@ func (c *svcContext) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		n := negroni.Classic()
 		n.UseHandler(mux)
 		c.trace("Launching http interface.")
-		graceful.Run(":8080", 5*time.Second, n)
+		graceful.Run(":8080", 5*time.Minute, n)
 	}()
 
 	maintick := time.Tick(tickdef)
