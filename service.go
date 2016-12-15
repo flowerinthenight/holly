@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"math"
 	"net/http"
 	"os"
@@ -28,7 +26,6 @@ import (
 	"golang.org/x/sys/windows/svc"
 	_ "golang.org/x/sys/windows/svc/debug"
 	_ "golang.org/x/sys/windows/svc/eventlog"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type httpContextValue struct {
@@ -68,63 +65,67 @@ func newEtw() *etw {
 
 // Service's main context structure.
 type svcContext struct {
-	*log.Logger                 // rotating logs (service level) using lumberjack
-	*etw                        // embedded etw tracer
-	busy        int32           // 0 = idle; 1 = busy
-	mruns       map[string]bool // run state for cmd lines
-}
-
-type cmdRunner struct {
-	console string
-	err     error
-}
-
-func (r *cmdRunner) run(cmd *exec.Cmd) {
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	r.err = cmd.Run()
-	if r.err == nil {
-		r.console = out.String()
-	}
+	*etw                  // embedded etw tracer
+	busy  int32           // 0 = idle; 1 = busy
+	mruns map[string]bool // run state for cmd lines
 }
 
 // Up to 15 args only. I don't know how to make this dynamic.
-func (c *svcContext) execute(args []string) (string, error) {
-	cr := cmdRunner{}
+func (c *svcContext) execute(args []string) ([]byte, error) {
+	var (
+		con []byte
+		err error
+	)
+
 	switch len(args) {
 	case 1:
-		cr.run(exec.Command(args[0]))
+		cmd := exec.Command(args[0])
+		con, err = cmd.Output()
 	case 2:
-		cr.run(exec.Command(args[0], args[1]))
+		cmd := exec.Command(args[0], args[1])
+		con, err = cmd.Output()
 	case 3:
-		cr.run(exec.Command(args[0], args[1], args[2]))
+		cmd := exec.Command(args[0], args[1], args[2])
+		con, err = cmd.Output()
 	case 4:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3])
+		con, err = cmd.Output()
 	case 5:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4])
+		con, err = cmd.Output()
 	case 6:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5])
+		con, err = cmd.Output()
 	case 7:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
+		con, err = cmd.Output()
 	case 8:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
+		con, err = cmd.Output()
 	case 9:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8])
+		con, err = cmd.Output()
 	case 10:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9])
+		con, err = cmd.Output()
 	case 11:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
+		con, err = cmd.Output()
 	case 12:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11])
+		con, err = cmd.Output()
 	case 13:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12])
+		con, err = cmd.Output()
 	case 14:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
+		con, err = cmd.Output()
 	case 15:
-		cr.run(exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14]))
+		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14])
+		con, err = cmd.Output()
 	}
 
-	return cr.console, cr.err
+	return con, err
 }
 
 func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
@@ -221,7 +222,9 @@ func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd strin
 		return
 	}
 
-	w.Write([]byte(`{"cmd":"` + cmd + `","result":"` + res + `"}`))
+	sres := fmt.Sprintf("%s", res)
+	c.trace(ip, sres)
+	w.Write([]byte(`{"cmd":"` + cmd + `","result":"` + sres + `"}`))
 }
 
 func handleHttpGetFileStat(c *svcContext) http.HandlerFunc {
@@ -369,6 +372,13 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		defer f.Close()
 		io.Copy(f, file)
 
+		// Don't do anything if runner is active.
+		if isRunnerActive() {
+			c.trace(ip, "Runner is active. Skip update.")
+			w.Write([]byte(`{"result":"GitLab runner active. Skip update."}`))
+			return
+		}
+
 		// Restart service regardless of update result status.
 		defer func() {
 			for i := 0; i < retry; i++ {
@@ -388,13 +398,6 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 				}
 			}
 		}()
-
-		// Don't do anything if runner is active.
-		if isRunnerActive() {
-			c.trace(ip, "Runner is active. Skip update.")
-			w.Write([]byte(`{"result":"GitLab runner active. Skip update."}`))
-			return
-		}
 
 		// Stop the runner service.
 		c.trace(ip, runner+` --> `+fstr)
@@ -433,6 +436,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 			}
 
 			c.trace(err)
+			time.Sleep(1 * time.Second)
 			if i >= retry-1 {
 				http.Error(w, "copy: "+err.Error(), 500)
 				return
@@ -731,11 +735,12 @@ func handleMainExecute(c *svcContext, count uint64) error {
 
 			if exec {
 				c.trace("Execute: ", items2)
-				c.Println("Execute", items2)
-				_, err := c.execute(items2)
+				con, err := c.execute(items2)
 				if err != nil {
 					c.trace(err)
-					c.Println(err)
+				} else {
+					scon := fmt.Sprintf("%s", con)
+					c.trace("console: " + scon)
 				}
 			}
 
@@ -829,6 +834,8 @@ loop:
 				go func(ctx *svcContext, count uint64) {
 					handleMainExecute(ctx, count)
 				}(c, cntr)
+			} else {
+				c.trace(`Function 'handleMainExecute' busy. Skip.`)
 			}
 		case crq := <-r:
 			switch crq.Cmd {
@@ -856,23 +863,7 @@ loop:
 }
 
 func runService(name string) {
-	// Create our main service context with etw tracer and rotating logger.
-	path, _ := getModuleFileName()
-	rlf := &lumberjack.Logger{
-		Dir:        filepath.Dir(path),
-		NameFormat: "holly.log",
-		MaxSize:    500,
-		MaxBackups: 3,
-		MaxAge:     30,
-	}
-
-	ctx := svcContext{
-		Logger: log.New(rlf, "HOLLY: ", log.Ldate|log.Ltime|log.Lshortfile),
-		etw:    newEtw(),
-		busy:   0,
-	}
-
-	defer rlf.Close()
+	ctx := svcContext{etw: newEtw(), busy: 0}
 	run := svc.Run
 	err := run(name, &ctx)
 	if err != nil {
