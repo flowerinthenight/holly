@@ -70,64 +70,6 @@ type svcContext struct {
 	mruns map[string]bool // run state for cmd lines
 }
 
-// Up to 15 args only. I don't know how to make this dynamic.
-func (c *svcContext) execute(args []string) ([]byte, error) {
-	var (
-		con []byte
-		err error
-	)
-
-	switch len(args) {
-	case 1:
-		cmd := exec.Command(args[0])
-		con, err = cmd.Output()
-	case 2:
-		cmd := exec.Command(args[0], args[1])
-		con, err = cmd.Output()
-	case 3:
-		cmd := exec.Command(args[0], args[1], args[2])
-		con, err = cmd.Output()
-	case 4:
-		cmd := exec.Command(args[0], args[1], args[2], args[3])
-		con, err = cmd.Output()
-	case 5:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4])
-		con, err = cmd.Output()
-	case 6:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5])
-		con, err = cmd.Output()
-	case 7:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
-		con, err = cmd.Output()
-	case 8:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
-		con, err = cmd.Output()
-	case 9:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8])
-		con, err = cmd.Output()
-	case 10:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9])
-		con, err = cmd.Output()
-	case 11:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
-		con, err = cmd.Output()
-	case 12:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11])
-		con, err = cmd.Output()
-	case 13:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12])
-		con, err = cmd.Output()
-	case 14:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
-		con, err = cmd.Output()
-	case 15:
-		cmd := exec.Command(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14])
-		con, err = cmd.Output()
-	}
-
-	return con, err
-}
-
 func (c *svcContext) setUpdateSelfAfterReboot(old string, new string) error {
 	var (
 		sysproc                     = syscall.MustLoadDLL("kernel32.dll").MustFindProc("MoveFileExW")
@@ -215,7 +157,7 @@ func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd strin
 		return
 	}
 
-	res, err := c.execute(args)
+	res, err := execute(args)
 	if err != nil {
 		c.trace(ip, err)
 		http.Error(w, err.Error(), 500)
@@ -735,7 +677,7 @@ func handleMainExecute(c *svcContext, count uint64) error {
 
 			if exec {
 				c.trace("Execute: ", items2)
-				con, err := c.execute(items2)
+				con, err := execute(items2)
 				if err != nil {
 					c.trace(err)
 				} else {
