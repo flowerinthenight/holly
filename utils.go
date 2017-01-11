@@ -17,6 +17,16 @@ const (
 	PS_ANY
 )
 
+func eInfo(v ...interface{}) {
+	m := fmt.Sprint(v...) // does not insert space in between items.
+	el.Info(1, m)
+}
+
+func eError(v ...interface{}) {
+	m := fmt.Sprint(v...) // does not insert space in between items.
+	el.Error(1, m)
+}
+
 // readLines reads a whole file into memory and returns a slice of its lines.
 func readLines(path string) ([]string, error) {
 	file, err := os.Open(path)

@@ -24,9 +24,11 @@ import (
 	"github.com/tylerb/graceful"
 	"github.com/urfave/negroni"
 	"golang.org/x/sys/windows/svc"
-	_ "golang.org/x/sys/windows/svc/debug"
-	_ "golang.org/x/sys/windows/svc/eventlog"
+	"golang.org/x/sys/windows/svc/debug"
+	"golang.org/x/sys/windows/svc/eventlog"
 )
+
+var el debug.Log
 
 type httpContextValue struct {
 	ipaddr string
@@ -47,8 +49,38 @@ func (e *etw) trace(v ...interface{}) {
 	fn := runtime.FuncForPC(pc)
 	fno := regexp.MustCompile(`^.*\.(.*)$`)
 	fnName := fno.ReplaceAllString(fn.Name(), "$1")
-	m := fmt.Sprint(v...)
+	m := fmt.Sprint(v...) // does not insert space in between items.
 	_, _, _ = e.proc.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("[" + fnName + "] " + m))))
+}
+
+// Trace + eventlog info entry.
+func (e *etw) traceInfo(v ...interface{}) {
+	if !e.init {
+		return
+	}
+
+	pc, _, _, _ := runtime.Caller(1)
+	fn := runtime.FuncForPC(pc)
+	fno := regexp.MustCompile(`^.*\.(.*)$`)
+	fnName := fno.ReplaceAllString(fn.Name(), "$1")
+	m := fmt.Sprint(v...) // does not insert space in between items.
+	_, _, _ = e.proc.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("[" + fnName + "] " + m))))
+	el.Info(1, m)
+}
+
+// Trace + eventlog error entry.
+func (e *etw) traceError(v ...interface{}) {
+	if !e.init {
+		return
+	}
+
+	pc, _, _, _ := runtime.Caller(1)
+	fn := runtime.FuncForPC(pc)
+	fno := regexp.MustCompile(`^.*\.(.*)$`)
+	fnName := fno.ReplaceAllString(fn.Name(), "$1")
+	m := fmt.Sprint(v...) // does not insert space in between items.
+	_, _, _ = e.proc.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("[" + fnName + "] " + m))))
+	el.Error(1, m)
 }
 
 func newEtw() *etw {
@@ -149,23 +181,23 @@ func doExec(ctx context.Context, c *svcContext, w http.ResponseWriter, cmd strin
 	c.trace(ip, cmd)
 	args := strings.Split(cmd, " ")
 	if interactive {
-		c.trace(ip, "cmd: ", args[0])
-		c.trace(ip, "args (joined): ", strings.Join(args[1:], " "))
+		c.traceInfo(ip, "cmd: ", args[0])
+		c.traceInfo(ip, "args (joined): ", strings.Join(args[1:], " "))
 		r, err := runInteractive(args[0], strings.Join(args[1:], " "), wait, waitms)
-		c.trace(ip, "return: ", r, ", err: ", err)
+		c.traceInfo(ip, "return: ", r, ", err: ", err)
 		w.Write([]byte(`{"cmd":"` + cmd + `","return":"` + fmt.Sprintf("%s", r) + `","error":"` + err.Error() + `"}`))
 		return
 	}
 
 	res, err := execute(args)
 	if err != nil {
-		c.trace(ip, err)
+		c.traceError(ip, err)
 		http.Error(w, err.Error(), 500)
 		return
 	}
 
 	sres := fmt.Sprintf("%s", res)
-	c.trace(ip, sres)
+	c.traceInfo(ip, "doExec: cmd = ", cmd, " | result = ", sres)
 	w.Write([]byte(`{"cmd":"` + cmd + `","result":"` + sres + `"}`))
 }
 
@@ -273,12 +305,12 @@ func handleHttpPostUpdateSelf(c *svcContext) http.HandlerFunc {
 
 		defer f.Close()
 		io.Copy(f, file)
-		c.trace(ip, path+` --> `+fstr)
+		c.traceInfo(ip, path+` --> `+fstr)
 		// Send reply first before triggering reboot (if needed).
 		w.Write([]byte(`{"result":"Self update applied.","reboot":"` + fmt.Sprintf("%v", reboot) + `"}`))
 		err = c.setUpdateSelfAfterReboot(path, fstr)
 		if reboot {
-			c.trace(ip, "Rebooting system...")
+			c.traceInfo(ip, "Rebooting system...")
 			rebootSystem()
 		}
 	})
@@ -316,7 +348,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 
 		// Don't do anything if runner is active.
 		if isRunnerActive() {
-			c.trace(ip, "Runner is active. Skip update.")
+			c.traceInfo(ip, "Runner is active. Skip update.")
 			w.Write([]byte(`{"result":"GitLab runner active. Skip update."}`))
 			return
 		}
@@ -324,16 +356,16 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		// Restart service regardless of update result status.
 		defer func() {
 			for i := 0; i < retry; i++ {
-				c.trace(ip, "attempt (start): ", i)
+				c.traceInfo(ip, "attempt (start): ", i)
 				cmd := exec.Command(runner, "start")
 				out, err := cmd.Output()
 				if err == nil {
 					sout := fmt.Sprintf("out: %s", out)
-					c.trace(sout)
+					c.traceInfo(sout)
 					break
 				}
 
-				c.trace(err)
+				c.traceError(err)
 				if i >= retry-1 {
 					http.Error(w, "start: "+err.Error(), 500)
 					return
@@ -342,18 +374,18 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 		}()
 
 		// Stop the runner service.
-		c.trace(ip, runner+` --> `+fstr)
+		c.traceInfo(ip, runner+` --> `+fstr)
 		for i := 0; i < retry; i++ {
-			c.trace(ip, "attempt (stop): ", i)
+			c.traceInfo(ip, "attempt (stop): ", i)
 			cmd := exec.Command(runner, "stop")
 			out, err := cmd.Output()
 			if err == nil {
 				sout := fmt.Sprintf("out: %s", out)
-				c.trace(sout)
+				c.traceInfo(sout)
 				break
 			}
 
-			c.trace(err)
+			c.traceError(err)
 			if i >= retry-1 {
 				http.Error(w, "stop: "+err.Error(), 500)
 				return
@@ -362,7 +394,7 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 
 		// Replace the runner exe.
 		for i := 0; i < retry; i++ {
-			c.trace(ip, "attempt (copy): ", i)
+			c.traceInfo(ip, "attempt (copy): ", i)
 			cmd := exec.Command(
 				"c:\\windows\\system32\\cmd.exe",
 				"/c",
@@ -373,11 +405,11 @@ func handleHttpPostUpdateGitlabRunner(c *svcContext) http.HandlerFunc {
 			out, err := cmd.Output()
 			if err == nil {
 				sout := fmt.Sprintf("out: %s", out)
-				c.trace(sout)
+				c.traceInfo(sout)
 				break
 			}
 
-			c.trace(err)
+			c.traceError(err)
 			time.Sleep(1 * time.Second)
 			if i >= retry-1 {
 				http.Error(w, "copy: "+err.Error(), 500)
@@ -676,13 +708,13 @@ func handleMainExecute(c *svcContext, count uint64) error {
 			}
 
 			if exec {
-				c.trace("Execute: ", items2)
+				c.traceInfo("Execute: ", items2)
 				con, err := execute(items2)
 				if err != nil {
-					c.trace(err)
+					c.traceError(err)
 				} else {
 					scon := fmt.Sprintf("%s", con)
-					c.trace("console: " + scon)
+					c.traceInfo("console: " + scon)
 				}
 			}
 
@@ -795,7 +827,7 @@ loop:
 				changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 				tick = maintick
 			default:
-				c.trace("Unexpected control request #", crq)
+				c.traceError("Unexpected control request #", crq)
 			}
 		}
 	}
@@ -805,13 +837,22 @@ loop:
 }
 
 func runService(name string) {
+	var err error
 	ctx := svcContext{etw: newEtw(), busy: 0}
-	run := svc.Run
-	err := run(name, &ctx)
+	// Setup event log access
+	el, err = eventlog.Open(name)
 	if err != nil {
-		ctx.trace("Service failed: ", err)
+		ctx.trace("Cannot initialize event log: ", err)
 		return
 	}
 
-	ctx.trace("Service stopped: ", name)
+	eInfo("Service start: ", name)
+	run := svc.Run
+	err = run(name, &ctx)
+	if err != nil {
+		ctx.traceError("Service failed: ", err)
+		return
+	}
+
+	ctx.traceInfo("Service stopped: ", name)
 }
