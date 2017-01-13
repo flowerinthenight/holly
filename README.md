@@ -1,3 +1,5 @@
+[![Build status](https://ci.appveyor.com/api/projects/status/3a8kp3btn32jg828/branch/master?svg=true)](https://ci.appveyor.com/project/flowerinthenight/holly/branch/master)
+
 # Overview
 
 A simple, cron-like Windows service with an http interface. I use this tool to manage our deployment servers, gitlab runners (all VM's are running Windows), test automation VM's, etc. A client tool [`n1.exe`](https://github.com/flowerinthenight/n1) is also available to interface with this service.
