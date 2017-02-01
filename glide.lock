@@ -12,7 +12,7 @@ imports:
 - name: github.com/urfave/negroni
   version: fde5e16d32adc7ad637e9cd9ad21d4ebc6192535
 - name: golang.org/x/sys
-  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
+  version: d75a52659825e75fff6158388dddc6a5b04f9ba5
   subpackages:
   - windows
   - windows/registry
